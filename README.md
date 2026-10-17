@@ -9,6 +9,7 @@ A private, collaborative research workspace for **PML4SC Lab**, with single-file
 | Initial database schema | **Completed:** `schema.sql` was executed successfully; `profiles`, `ideas`, and `idea_events` exist |
 | Authentication settings | **Configured:** public signup disabled, email authentication enabled, anonymous sign-in disabled; also confirmed by a read-only Auth settings check |
 | Four member accounts and profiles | **Not completed:** Shibo, Yan, Junqi, and Yifan have not been created/invited; no Auth UUIDs are mapped and Shibo's PI role is not assigned |
+| Invitation onboarding (set-your-own-password) | **Implemented locally, not deployed:** frontend handling and tests only. Site URL, Redirect URLs, the invitation email template, and SMTP have **not** been configured or verified by this change; no invitation has been sent; live invitation acceptance is untested |
 | Markdown description migration | **Not completed:** production still enforces the original **20,000-character** constraint; the local schema's **102,400-byte** upgrade is pending approval and execution |
 | GitHub Pages | **Not deployed:** application changes remain local; no code has been pushed or deployed |
 | Live integration tests | **Not completed:** real-member authentication and multi-user Realtime behavior remain unverified |
@@ -23,7 +24,7 @@ GitHub Pages: index.html (HTML + CSS + vanilla JavaScript)
          Supabase JS 2.118.0, pinned CDN + integrity hash
                       │
        Existing Supabase project: kgfybebpxpdkiouofyow
-           ├── Auth: individual email/password accounts
+           ├── Auth: Dashboard invitations, then email/password
            ├── PostgreSQL: profiles, ideas, idea_events
            ├── RLS: active allowlisted members can read
            ├── RPCs: authorized, transactional mutations
@@ -36,8 +37,10 @@ GitHub Pages: index.html (HTML + CSS + vanilla JavaScript)
 | `supabase/schema.sql` | Tables, constraints, indexes, triggers, policies, RPCs, grants, Realtime publication |
 | `README.md` | Setup, deployment, maintenance, and verification |
 | `.gitignore` | Excludes credentials, local configuration, dependencies, and test outputs |
+| `.gitattributes` | Enforces LF line endings for HTML, Markdown, JavaScript, SQL, and Git configuration files |
 | `tests/database.test.mjs` | Isolated PostgreSQL permission, state-machine, audit, and real concurrency tests |
 | `tests/frontend.test.mjs` | Syntax and DOM integration tests using a simulated transport |
+| `tests/invitation.test.mjs` | Invitation callback, password setup, login/logout, and allowlist tests with a simulated Auth client and the actual pinned SDK answered by local fetch responses |
 | `reference/` | Existing user-supplied LeetCode reference, left unchanged |
 
 No production Node server, framework, package installation, or build system is required. Node is used only for optional development tests. All task data comes from Supabase; the frontend includes no seeded ideas or fallback database. The SDK persists **Auth sessions** in browser storage. Idea data and permissions are never persisted there; filters and disclosure preferences are kept in memory.
@@ -45,6 +48,7 @@ No production Node server, framework, package installation, or build system is r
 ## Implemented workflow
 
 - Individual login/logout, restored sessions, explicit allowlist lookup, PI-aware controls.
+- Invitation onboarding: a member opens the Supabase invitation email, lands on **Set Your Password**, chooses their own password through `supabase.auth.updateUser`, and then enters the tracker only if their profile is active. The administrator never sees or assigns member passwords. See section 2.
 - PI publication, Markdown editing/import with live preview, deletion, and reopening; database-generated `IDEA-001` identifiers that are never recycled. Sequence gaps are normal after rolled-back transactions or deletion.
 - Atomic claim: `available + unassigned → testing + auth.uid()`.
 - Assignee or PI release and completion, required Success/Fail result, optional notes and HTTP(S) experiment URL.
@@ -187,38 +191,130 @@ where n.nspname = 'public' and p.proname in
   'release_idea', 'complete_idea', 'reopen_idea');
 ```
 
-## 2. Configure authentication
+## 2. Configure authentication and invitations
 
-**Already configured:** email authentication is enabled; public signup and anonymous sign-in are disabled. Keep these settings. URL settings have not been reverified in this parser-fix pass. The setup checklist below is retained for reference.
+**Already configured:** email authentication is enabled; public signup and anonymous sign-in are disabled. Keep these settings. **Not yet configured or verified:** Site URL, Redirect URLs, the invitation email template, SMTP, and link expiry below. No invitation has been sent.
 
-In the existing project's **Authentication** settings:
+> **Do not send any invitation until the frontend is deployed and A–C below are complete.** An invitation email's link is fixed when the email is sent and can be used only once. A link sent while the Site URL or template points elsewhere (for example Supabase's default `http://localhost:3000`) leads members to a dead page and wastes the invitation.
 
-1. Enable the **Email** provider / email-and-password login.
-2. Turn **Allow new users to sign up** off. Keep anonymous sign-ins and unused OAuth providers disabled.
-3. Keep email confirmation enabled for ordinary flows. For the four administrator-created accounts below, use the Dashboard's **Auto Confirm User** option only after verifying each member's email ownership with them.
-4. Under **URL Configuration**, set Site URL to:
-   `https://anthonyzhangyan.github.io/autoresearch-idea-tracker/`
-5. Add these exact Redirect URLs for deployed/local use:
-   - `https://anthonyzhangyan.github.io/autoresearch-idea-tracker/`
-   - `http://localhost:8000/`
-   - `http://127.0.0.1:8000/`
-   If you use a different local port or test under the repository subpath, add that exact URL too. Avoid broad production wildcards.
+### How invitation onboarding works
 
-Email/password login stays on the current page; it does not require a redirect callback. This MVP deliberately uses administrator-provisioned accounts, with no signup, invite-acceptance, or email password-recovery screen. URL session detection is disabled. Do not use email invitations as a substitute for the manual procedure below: a complete invite/recovery flow would need its own password-entry screen. Forgotten passwords are handled securely by the administrator outside this UI.
+1. The administrator invites a member from the Supabase Dashboard. The tracker has no invitation UI and never uses the `service_role` key; the publishable key is enough for everything the page does.
+2. Supabase emails the member a one-time link to `https://anthonyzhangyan.github.io/autoresearch-idea-tracker/`.
+3. The page detects the callback, removes the one-time credentials from the address bar (keeping the `/autoresearch-idea-tracker/` path), and establishes the session **once** with the SDK:
+   - `?token_hash=…&type=invite` (recommended template, C below) → `supabase.auth.verifyOtp({token_hash, type:'invite'})`
+   - `#access_token=…&refresh_token=…&type=invite` (default template) → `supabase.auth.setSession(...)`, which validates the token with Supabase Auth
+   - `?code=…` (PKCE) → `supabase.auth.exchangeCodeForSession(code)`, attempted once. Dashboard invitations do not normally produce codes; this only covers a PKCE configuration.
+   - `error`/`error_code` parameters (for example `otp_expired`) → "This invitation link has expired or is invalid. Please contact the administrator for a new invitation."
 
-Dashboard labels can vary; see [Auth configuration](https://supabase.com/docs/guides/auth/general-configuration), [password authentication](https://supabase.com/docs/guides/auth/passwords), and [redirect URL configuration](https://supabase.com/docs/guides/auth/redirect-urls).
+   The SDK's automatic URL detection stays disabled, so no credential is processed twice. The login page is not shown while this is in progress.
+4. The member sees **Set Your Password**, enters and confirms a new password, and the page calls `supabase.auth.updateUser({password})` using that invitation session. The password goes only to Supabase Auth. It is never written to a table, URL, log, or browser storage.
+5. The page confirms "Your password has been created successfully." and then checks `public.profiles`. An **active profile** shows **Enter the tracker**. Without one, the member sees "Your account has been created, but access to this research workspace has not yet been authorized. Please contact the administrator." No profile or role is created automatically.
+6. From then on the member uses the ordinary **Email + Password** login. Refreshing or returning never shows onboarding again. If the member reloads *before* creating a password, setup resumes; the browser keeps only their Auth user ID for that purpose, and removes it on completion or logout.
 
-## 3. Create and allowlist the four real members
+Invitations work while **Allow new users to sign up** is off. Keep it off.
 
-**Not completed:** none of the four Auth accounts has been created/invited or mapped to `profiles`, and the PI role has not been assigned. Provisioning requires a separate authorized administrative step; this patch creates no accounts.
+### A. Site URL
 
-The members **do not need Supabase Dashboard accounts**. Only the administrator needs Dashboard access. No actual member email addresses or passwords have been provided, and none are included in this repository.
+**Authentication → URL Configuration → Site URL**:
+
+```text
+https://anthonyzhangyan.github.io/autoresearch-idea-tracker/
+```
+
+Use exactly this value: `https`, the repository subpath, and the trailing slash. Dashboard invitations have no per-invite redirect option, so Supabase returns invited members to the Site URL. Save, then reload the page and confirm the value.
+
+### B. Redirect URLs
+
+On the same page, under **Redirect URLs → Add URL**, add:
+
+```text
+https://anthonyzhangyan.github.io/autoresearch-idea-tracker/
+```
+
+Add these only if you test the invitation flow against a local server (section 5):
+
+```text
+http://localhost:8000/
+http://127.0.0.1:8000/
+```
+
+Supabase only redirects to allow-listed URLs and otherwise falls back to the Site URL. Use exact URLs; avoid wildcards for production. The app is a single page with no `/auth/callback` route, so every callback goes to the repository root shown above. Do not add `https://anthonyzhangyan.github.io/` alone: it is a different site.
+
+### C. Invitation email
+
+**Authentication → Emails → Templates → Invite user** (labels vary by Dashboard version).
+
+**Recommended:** replace the link in the template body. Keep the subject as you like:
+
+```html
+<h2>You have been invited to the PML4SC Lab AutoResearch Idea Tracker</h2>
+<p>Follow this link to accept the invitation and create your password:</p>
+<p><a href="https://anthonyzhangyan.github.io/autoresearch-idea-tracker/?token_hash={{ .TokenHash }}&type=invite">Accept the invitation</a></p>
+```
+
+Why: with the default `{{ .ConfirmationURL }}`, Supabase consumes the one-time token at its `/verify` endpoint as soon as the link is fetched. University and corporate mail scanners (for example Safe Links) often pre-open links, which can use up the invitation before the member clicks it. With the template above, the token is consumed only when the tracker page runs in the member's browser. The URL is written out in full so it does not depend on whether the Site URL has a trailing slash. `{{ .SiteURL }}?token_hash={{ .TokenHash }}&type=invite` is equivalent if the Site URL is exactly as in A.
+
+**Default template (also supported):** if you keep `{{ .ConfirmationURL }}`, Supabase verifies the token and redirects to the Site URL with `#access_token=…&type=invite`. The page handles that too, but it is vulnerable to the link pre-fetching described above.
+
+Also check, in the Email provider / Auth settings (labels vary):
+
+- **Email delivery:** Supabase's built-in email service is intended for testing. It delivers only to email addresses of your Supabase organization's team members and is heavily rate-limited. To reach the lab members' own addresses, configure **custom SMTP** (Authentication → Emails → SMTP Settings) with an approved sender, or confirm the current behavior in [Supabase's SMTP guide](https://supabase.com/docs/guides/auth/auth-smtp). Send one invitation to yourself first.
+- **Link lifetime:** invitations expire after the configured email OTP expiration. Choose a value that gives members time to respond (Supabase allows at most 24 hours), and tell members to accept promptly.
+- **Password requirements:** set **Minimum password length to at least 8**, the minimum the page enforces before submitting. Any character requirements you configure are enforced by Supabase Auth and shown to the member if a password does not meet them. Supabase Auth rejects passwords longer than 72 bytes, and the page checks this too.
+- Keep **Confirm email** enabled. Accepting an invitation confirms the member's address. Keep anonymous sign-ins and unused OAuth providers disabled.
+
+Password recovery/reset links are **not** handled by this page; it accepts only `type=invite` callbacks. Forgotten passwords after onboarding remain an administrator task (section 3).
+
+Dashboard labels change over time; see [Auth configuration](https://supabase.com/docs/guides/auth/general-configuration), [redirect URLs](https://supabase.com/docs/guides/auth/redirect-urls), [email templates](https://supabase.com/docs/guides/auth/auth-email-templates), and [password security](https://supabase.com/docs/guides/auth/password-security).
+
+## 3. Invite and allowlist the four real members
+
+**Not completed:** none of the four Auth accounts has been invited or mapped to `profiles`, and the PI role has not been assigned. Provisioning requires a separate authorized administrative step; this patch invites no one and creates no accounts.
+
+The members **do not need Supabase Dashboard accounts**, and the administrator never knows their passwords. Only the administrator needs Dashboard access. No actual member email addresses have been provided, and none are included in this repository.
+
+### Configuration order
+
+1. **Deploy the frontend** to GitHub Pages (section 8) and confirm the page loads at `https://anthonyzhangyan.github.io/autoresearch-idea-tracker/`.
+2. **Configure the Site URL and Redirect URLs** (section 2 A–B).
+3. **Configure the invitation email flow** (section 2 C): template, SMTP, link lifetime, password length.
+4. **Invite the members** through the Supabase Dashboard (below). Invite yourself or one member first and complete the flow before inviting the rest.
+5. **Obtain the Auth UUIDs and insert the profiles** (below).
+6. **Let members accept their invitations** and set their own passwords.
+7. **Test authentication and authorization** (section 6).
+
+Invitations must not be sent before steps 1–3 are complete and the production redirect URL is correct. Doing step 5 before step 6 lets members enter the tracker immediately after creating their password. If a member finishes step 6 first, they see the "not yet authorized" message. Once the profile exists, they simply sign in with their email and password; no new invitation is needed.
+
+### Invite each member
 
 1. Privately obtain each member's real email address and verify who owns it.
-2. In **Authentication → Users → Add user → Create new user**, create an email/password account for each member. Use a unique strong password generated outside this repository; coordinate delivery through an approved private channel. Do not put credentials into Git, SQL snippets, screenshots, browser source, or chat logs.
-3. Use **Auto Confirm User** for that manually verified account if available; otherwise complete its supported email verification before login. Do not globally disable verification merely to work around an unconfirmed account.
-4. Copy each user's **Auth UUID** from the Dashboard. Match each UUID to the actual person, not to client-editable metadata.
-5. In SQL Editor as `postgres`, replace the four placeholder strings below with those UUIDs and execute once. The placeholders intentionally are not executable UUIDs.
+2. **Authentication → Users → Add user → Invite user** (also labelled "Send invitation"). Enter the email address and send. Repeat for each member.
+3. The user appears immediately in the Users list (awaiting verification), so their Auth UUID is available before they accept.
+4. If an invitation expires or is used up (the member sees "This invitation link has expired or is invalid"), invite the same address again from the Dashboard. If Supabase reports that the user already exists and is confirmed, the member has already set a password and should sign in normally.
+
+Do not use **Create new user** with an administrator-chosen password for lab members; the invitation flow exists so that only the member knows their password. Do not put email addresses or other credentials into Git, screenshots, or chat logs.
+
+### Obtain each Auth UUID
+
+Open **Authentication → Users**, select the user, and copy **User UID**. Alternatively, run this read-only query in SQL Editor, replacing the placeholders with the real addresses:
+
+```sql
+-- Administrator only. Read-only.
+select id, email, invited_at, email_confirmed_at, last_sign_in_at
+from auth.users
+where lower(email) in (lower('<SHIBO_EMAIL>'), lower('<YAN_EMAIL>'),
+                       lower('<JUNQI_EMAIL>'), lower('<YIFAN_EMAIL>'))
+order by email;
+```
+
+Match each UUID to the actual person, not to client-editable metadata. `email_confirmed_at` becomes non-null once the member has accepted the invitation.
+
+### Map the UUIDs to profiles
+
+Role mapping: **Shibo → `pi`**, **Yan → `researcher`**, **Junqi → `researcher`**, **Yifan → `researcher`**.
+
+In SQL Editor as `postgres`, replace the four placeholder strings below with those UUIDs and execute once. The placeholders intentionally are not executable UUIDs.
 
 ```sql
 begin;
@@ -243,6 +339,8 @@ update public.profiles set active = false where id = '<MEMBER_AUTH_UUID>'::uuid;
 ```
 
 Reads and RPC authorization then reject that member. Connected UIs remove cached workspace data on the next membership refresh; already downloaded information cannot be recalled. Ban/revoke their Auth sessions through administrative Auth tools as appropriate. Re-enable by setting `active = true`. Do not delete Auth/profile rows casually: restrictive foreign keys intentionally preserve attribution. Account replacement needs a reviewed administrative migration.
+
+**Forgotten passwords:** self-service password reset is not implemented; the page rejects recovery links. If a member forgets their password after onboarding, the administrator handles it outside the tracker, for example by setting a temporary password in the Dashboard and delivering it privately. A reset page would be a separate, reviewed change.
 
 ## 4. Verify Realtime configuration
 
@@ -339,6 +437,19 @@ await state.client.rpc('delete_idea', {
 
 A non-assignee researcher calling `release_idea` or `complete_idea` must get Permission denied. Completing an available idea must fail; changing a completed result via another completion must fail. A stale `p_expected_revision` must fail even when the same person owns a later testing cycle. Do not test authorization only in SQL Editor as `postgres`, because that role bypasses RLS.
 
+### Invitation onboarding (live Supabase and real email required)
+
+Use a real address you control first, ideally your own, before inviting the other members.
+
+1. Invite the address from the Dashboard and open the email in a **private window**. Confirm the link points to `https://anthonyzhangyan.github.io/autoresearch-idea-tracker/`. After clicking, the address bar must show that URL with no `token_hash`, `access_token`, or `code` left in it.
+2. Confirm **Set Your Password** appears, with the invited email shown read-only. Check that mismatched or too-short passwords are rejected without a request, and that Show passwords works.
+3. Create the password. Confirm "Your password has been created successfully." and either **Enter the tracker** (profile active) or the "not yet authorized" message (no profile).
+4. Reload: onboarding must not reappear. Log out, then sign in with the email and new password.
+5. Click the same invitation link again. It must show "This invitation link has expired or is invalid…" and must not open the password form.
+6. Let a test invitation expire (or use a link after changing the OTP expiry) and confirm the expired message.
+7. With Shibo signed in, open another member's invitation link in the same browser profile. The page must show the invited account and say Shibo was signed out. Shibo's workspace must not appear.
+8. In DevTools → Application, confirm no password appears in Local Storage or Session Storage. The SDK's own `sb-…-auth-token` entry holds the session, not the password.
+
 ### Workflow, history, and persistence
 
 1. Shibo publishes **Manual verification idea**, using a Monday. Confirm Available, Unassigned, and no result.
@@ -412,10 +523,30 @@ TRACKER_TEST_DEPS="$(mktemp -d /tmp/autoresearch-tests.XXXXXX)"
 export TRACKER_TEST_DEPS
 npm install --prefix "$TRACKER_TEST_DEPS" --no-audit --no-fund \
   embedded-postgres@18.4.0-beta.17 pg@8.16.3 jsdom@27.1.0 \
-  markdown-it@15.0.3 dompurify@3.4.17 katex@0.19.0 markdown-it-texmath@1.0.0
+  markdown-it@15.0.3 dompurify@3.4.17 katex@0.19.0 markdown-it-texmath@1.0.0 \
+  @supabase/supabase-js@2.118.0
 node tests/database.test.mjs
 node tests/frontend.test.mjs
+node tests/invitation.test.mjs
 ```
+
+`.gitattributes` keeps HTML, Markdown, JavaScript, SQL, and Git configuration files LF in every checkout, including Windows with `core.autocrlf=true`. The database test's schema parsing also accepts CRLF, so an older CRLF checkout still runs.
+
+`invitation.test.mjs` runs each scenario as a fresh page load against a simulated Supabase Auth client. It covers:
+
+- normal and invalid login, restored sessions, logout
+- `token_hash`, fragment-token, and PKCE-code callbacks under the `/autoresearch-idea-tracker/` subpath, with URL cleanup
+- the verifying state, before the login page could appear
+- password validation, show/hide, a single `updateUser({password})` call, and disabled double submission
+- no password in storage, logs, or URLs
+- expired, used, unsupported, and malformed links
+- network retry
+- account switching
+- resuming after a reload, without reappearing after completion
+- unauthorized users
+- Supabase password errors
+
+It then loads the **actual pinned SDK bundle**, asserting its SHA-384 equals the page's `integrity` attribute, and answers its `fetch` calls locally. This checks the real request shapes: `/verify` with `token_hash`/`type=invite`, `PUT /user` carrying the password only to Auth with the invitation bearer token, a single `/token` code exchange, and the mapping of `otp_expired`, `weak_password`, and network errors. No request leaves the process. Hosted email delivery, Supabase's `/verify` redirect, and Dashboard settings are **not** exercised.
 
 If port 55439 is occupied, set `TRACKER_TEST_PORT` to another free port. You can delete the temporary dependency directory afterwards. Synthetic fixtures exist only in the test suite; they are never seeded into the production application.
 
@@ -423,23 +554,24 @@ Validation performed on **October 16, 2026**:
 
 - **135 PostgreSQL checks passed**, including real row-lock contention between two connections, exactly one successful claim, all seven RPC paths, anonymous/unlisted/revoked-user access, researcher permission boundaries, direct-write denials, state and Monday constraints, stale revision protection, historical result retention, nonreused identities, schema reruns, grants, and publication membership. Added checks execute the actual plain SQL, upgrade an existing exclusive publication, reject shared/all-table/empty-schema-wide publications without collateral changes, inspect actual `pgoutput` logical replication messages (INSERT/UPDATE and deletion audit INSERT present; DELETE absent), and verify active versus non-member/deactivated access to audit snapshots. Markdown checks cover migration from the original constraint without data loss, complete source preservation, descriptions beyond the old limit, UTF-8 byte boundaries, PI-only edits, revision conflicts, audit snapshots, and rejection without overwriting existing content.
 - **227 JavaScript syntax/DOM integration checks passed** using a simulated transport: actual-record counters, filters, forms/RPC arguments, conflict handling, safe rendering, history, session isolation, duplicate refresh coalescing, offline/reconnection behavior, and stale-data protection. Two independent receiving DOM instances now also refresh on simulated INSERT/UPDATE and remove a remotely deleted idea from the audit INSERT alone, with polling disabled and no direct DELETE notification. The Markdown tests execute the actual pinned browser parser, sanitizer, math engine and math plugin: import/title extraction, code fences, tables, formulas, malicious markup/URLs, sanitizer failure, byte/UTF-8 validation, one explicit publish per file, editable previews, old-schema errors, and source preservation. The math regressions additionally cover closing-line prose, escaped dollar signs/backslashes and other LaTeX escapes, adjacent/multiple equations, multiline display math (including blank lines), lists/quotes, unclosed delimiters, literal code, source preservation through import/publication, and sanitization of trailing malicious markup. These do not establish live network or hosted Realtime behavior.
+- **147 invitation/login checks passed** (`tests/invitation.test.mjs`, added with invitation onboarding on October 16, 2026), including the actual pinned SDK 2.118.0 with local fetch responses. The 135 PostgreSQL and 227 frontend checks above were re-run after the invitation change and still pass; the schema is unchanged. The Set Your Password, invalid-link, and not-authorized screens were rendered as static snapshots in headless Chrome at desktop width and match the existing dark theme. Phone widths were not reliably verified, because headless window sizing also cropped the unchanged login page. No hosted invitation email, Supabase `/verify` redirect, or live Auth request has been tested.
 - Earlier implementation validation: Chrome visual checks covered the real login page and clearly labeled synthetic dashboard renderings at desktop and mobile widths, including 320px/390px. The production login loaded the pinned CDN SDK without console warnings/errors.
 - Earlier Markdown implementation validation (not repeated for this parser-only fix): Chrome visual checks of the clearly labeled local test fixture confirmed the desktop side-by-side editor and stacked 390px mobile layout, tables, code blocks, inline math, and multiline display math, with no horizontal page/dialog overflow. The actual local login page and Markdown fixture had no console warnings/errors. All six pinned CDN script/stylesheet integrity hashes matched the downloaded resources. The visual fixture uses synthetic data and does not establish a hosted login or publication result.
 - Current parser-fix pass: read-only Auth settings confirm **email enabled**, **anonymous sign-in disabled**, and **public signup disabled**. Anonymous Data API requests (`select=id&limit=0`) return **401 / 42501, permission denied** for `profiles`, `ideas`, and `idea_events`; no rows were retrieved. These supersede the earlier pre-installation missing-table/signup observations. The project owner confirms initial schema installation and the pending account/description-migration statuses in the deployment table above. No hosted mutations were performed.
 
-**Still required, after approval:** verify the live publication and its consumers; apply the **description-limit migration**; create the four Auth accounts, map their UUIDs and assign Shibo's PI role; deploy the frontend; verify authenticated Data API/RPC requests, Markdown round trips, atomic claims, audit-driven deletion delivery, denial of restricted WebSocket data to non-members/deactivated members, reconnection/session persistence, and the GitHub Pages URL. Initial schema installation and disabling public signup are already complete. Local PostgreSQL validates database logic and the publication stream, not Supabase's hosted gateway/Auth/Realtime services. This parser-fix pass made only the read-only hosted checks documented above, created no accounts, modified no production data, and neither deployed nor pushed changes. No SQL changes were necessary for the parser fixes; the existing SQL remains plain SQL with no escaping transformations.
+**Still required, after approval:** verify the live publication and its consumers; apply the **description-limit migration**; deploy the frontend; configure Site URL/Redirect URLs/invitation template/SMTP (section 2); invite the four members, map their UUIDs and assign Shibo's PI role; run the live invitation checks (section 6); verify authenticated Data API/RPC requests, Markdown round trips, atomic claims, audit-driven deletion delivery, denial of restricted WebSocket data to non-members/deactivated members, reconnection/session persistence, and the GitHub Pages URL. Initial schema installation and disabling public signup are already complete. Local PostgreSQL validates database logic and the publication stream, not Supabase's hosted gateway/Auth/Realtime services. This parser-fix pass made only the read-only hosted checks documented above, created no accounts, modified no production data, and neither deployed nor pushed changes. No SQL changes were necessary for the parser fixes; the existing SQL remains plain SQL with no escaping transformations.
 
 ## 8. Deploy to GitHub Pages — only after approval
 
 The repository is already cloned. Do not create or clone another repository. The deployment below makes frontend source public; research data remains behind Supabase Auth/RLS.
 
-1. Review changes and confirm no credentials or private research records are staged. The existing untracked `reference/` file is not needed by the app and is intentionally excluded from the explicit staging command.
+1. Review changes and confirm no credentials or private research records are staged. The `reference/` file is already tracked from an earlier commit. The app does not use it, and the explicit staging command below leaves it out.
 2. After explicit approval to publish, run:
 
    ```sh
    git status --short
    git diff --check
-   git add index.html README.md .gitignore supabase/schema.sql tests/database.test.mjs tests/frontend.test.mjs
+   git add .gitattributes index.html README.md .gitignore supabase/schema.sql tests/database.test.mjs tests/frontend.test.mjs tests/invitation.test.mjs
    git diff --cached
    git commit -m "Implement collaborative AutoResearch idea tracker"
    git push origin main
@@ -483,6 +615,11 @@ Titles are limited to 200 characters; Markdown descriptions to 102,400 UTF-8 byt
 | Sign-in library could not load | Internet/CDN access, the pinned SDK URL and matching integrity hash, browser console, stale cached HTML |
 | Invalid credentials / unconfirmed email | Correct Auth project, exact member email/password, account confirmation; never use the database password |
 | Access has not been granted | Auth UUID matches the administrator-created profile; `active = true`; no reliance on editable name/email metadata |
+| Invitation email never arrives | Custom SMTP configured (the built-in service only reaches organization team members and is rate-limited); spam folder; Auth logs in the Dashboard |
+| Invitation link opens `localhost` or the wrong site | Site URL/Redirect URLs (section 2 A–B) were wrong when the email was sent. Fix them, then send a **new** invitation; old emails keep their old link |
+| "This invitation link has expired or is invalid" on first click | Link expired, was already used, or was pre-opened by a mail scanner with the default template. Switch to the `token_hash` template (section 2 C) and re-invite |
+| "Your account has been created, but access … has not yet been authorized" | Insert the member's profile (section 3). The member then signs in normally; no new invitation is needed |
+| Password rejected after submitting | Supabase Auth's configured password requirements; the message shown is Supabase's own rule |
 | Database setup incomplete / PGRST205 / missing RPC | Run the entire SQL file, expose `public` in Data API, and reload PostgREST schema cache |
 | Permission denied for table/function | Check explicit SELECT/EXECUTE grants and active profile; do not grant blanket writes or turn off RLS |
 | Refusing to change shared supabase_realtime publication | Deployment was rolled back; the previous configuration remains. Inspect all table/schema memberships and external consumers; resolve shared usage before deploying, without bypassing the guard |

@@ -1,0 +1,11 @@
+# Keep text sources LF in the repository and in every checkout, regardless of
+# a contributor's core.autocrlf setting, so diffs, `git diff --check`, and the
+# schema-parsing tests behave the same on Windows, macOS, and Linux.
+* text=auto
+*.html text eol=lf
+*.md text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.sql text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf

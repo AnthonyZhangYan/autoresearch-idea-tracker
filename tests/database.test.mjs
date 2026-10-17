@@ -52,7 +52,7 @@ try {
   check((await admin.query("select count(*)::int n from pg_publication_tables where pubname='supabase_realtime' and schemaname='unrelated_app'")).rows[0].n,1,'unrelated membership unchanged');
   await admin.query('alter publication supabase_realtime drop table unrelated_app.ideas');
   await admin.query(schema);
-  const publicationSetup = schema.match(/do \$\$\ndeclare v_table text;[\s\S]*?\n\$\$;/)[0];
+  const publicationSetup = schema.match(/do \$\$\r?\ndeclare v_table text;[\s\S]*?\r?\n\$\$;/)[0];
   for (const scope of ['all tables','tables in schema unrelated_empty']) {
     await admin.query(`begin;
       alter publication supabase_realtime rename to tracker_test_original;

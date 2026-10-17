@@ -14,6 +14,7 @@
     .topbar{border-bottom:1px solid var(--border);padding:17px max(24px,calc((100% - 1180px)/2));display:flex;align-items:center;justify-content:space-between;gap:16px;background:#14171c}.brand{display:flex;align-items:center;gap:11px;font-weight:700;font-size:14px;letter-spacing:.3px}.brand-icon{display:grid;place-items:center;width:30px;height:30px;border:1px solid #386153;border-radius:8px;background:#1b352d;color:var(--accent);font-size:20px}.connection{font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center}.connection:before{content:'';height:7px;width:7px;background:var(--muted);border-radius:50%;flex:none}.connection[data-state=connected]:before{background:var(--accent);box-shadow:0 0 10px #3ccca933}.connection[data-state=reconnecting]:before{background:var(--amber)}.connection[data-state=offline]:before{background:var(--red)}
     main{max-width:1228px;margin:0 auto;padding:40px 24px 60px}.page-heading{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:30px}.page-heading p{margin-bottom:0}.account{display:flex;align-items:center;gap:14px}.account-name{text-align:right;font-size:13px}.avatar{width:36px;height:36px;display:grid;place-items:center;border-radius:50%;background:#253d36;color:#94ebd1;font-weight:700}.actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
     .login{max-width:440px;margin:7vh auto 12vh;background:var(--card);border:1px solid var(--border);border-radius:18px;padding:32px}.login h1{font-size:28px;margin-top:20px}.login p{font-size:14px}.login .primary{width:100%;padding:12px;margin-top:8px}.login-foot{border-top:1px solid var(--border);padding-top:20px;margin:24px 0 0!important;font-size:12px!important}.field{display:grid;gap:7px;margin:16px 0;font-size:13px;font-weight:600}.field small{font-weight:400;color:var(--muted)}input,textarea,select{width:100%;min-width:0;font-size:14px}textarea{resize:vertical;min-height:115px}.error-text{font-size:13px;color:var(--red);white-space:pre-wrap}.gate{max-width:550px;margin:9vh auto;text-align:center}.gate p{white-space:pre-wrap}
+    .login h2{font-size:19px;margin:24px 0 6px}.check{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--muted);margin:4px 0 12px;cursor:pointer}.check input{width:auto;accent-color:var(--accent)}.notice-text{font-size:13px!important;color:var(--amber)!important;white-space:pre-wrap}input[readonly]{color:var(--muted)}.onboarding-actions{display:grid;gap:8px;margin-top:18px}
     .overview{border:1px solid var(--border);background:var(--card);border-radius:16px;overflow:hidden;margin-bottom:28px}.overview-head{display:flex;justify-content:space-between;gap:16px;padding:19px 22px;border-bottom:1px solid var(--border)}.overview-head h2{margin:0;font-size:14px}.stats{display:grid;grid-template-columns:repeat(6,1fr);padding:22px 10px}.stat{padding:0 20px;border-right:1px solid var(--border)}.stat:last-child{border:0}.stat-label{font-size:12px;color:var(--muted);margin-bottom:5px}.stat-value{font-size:30px;font-weight:650;letter-spacing:-1px}.stat[data-kind=testing] .stat-value{color:var(--blue)}.stat[data-kind=completed] .stat-value,.stat[data-kind=success] .stat-value{color:var(--accent)}.stat[data-kind=fail] .stat-value{color:var(--red)}.progress-area{padding:0 22px 22px}.progress-label{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--muted);margin-bottom:10px}.progress-track{height:7px;background:#303640;border-radius:20px;overflow:hidden}.progress-fill{height:100%;width:0;background:linear-gradient(90deg,#239b7f,#63e4bb);transition:width .2s}
     .section-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:17px}.section-heading h2{margin:0}.section-heading .small{margin-left:9px;font-weight:400}.filters{border:1px solid var(--border);background:#191d23;border-radius:13px;padding:16px;margin-bottom:14px}.search-row{display:grid;grid-template-columns:1fr 180px;gap:12px}.search-input{background:#101419}.filter-row{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:12px}.filter-row label,.search-row label{font-size:11px;color:var(--muted);display:grid;gap:6px}.filter-row select,.search-row select{font-size:12px;padding:9px}.toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:14px 0 19px}.toolbar button{padding:7px 10px;font-size:12px}.banner{padding:13px 16px;border:1px solid #695b38;background:#2b261b;color:#f3d697;border-radius:9px;font-size:13px;margin-bottom:20px}
     .week{border:1px solid var(--border);border-radius:13px;background:var(--card);margin-bottom:16px;overflow:hidden}.week>summary{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:18px 20px;list-style:none}.week>summary::-webkit-details-marker,.idea>summary::-webkit-details-marker{display:none}.week>summary:hover{background:#222831}.week-title{display:flex;gap:12px;align-items:center}.chevron{display:inline-block;color:var(--muted);font-size:12px;transition:transform .15s}.week:not([open])>summary .chevron,.idea:not([open])>summary .chevron{transform:rotate(-90deg)}.week-name{font-size:14px;font-weight:650}.week-meta{font-size:12px;color:var(--muted);white-space:nowrap}.week-ideas{padding:0 12px 12px}.idea{border-top:1px solid var(--border)}.idea>summary{list-style:none;display:grid;grid-template-columns:15px 84px minmax(0,1fr) auto auto;align-items:center;gap:12px;padding:17px 9px;min-height:65px}.idea>summary:hover{background:#222831;border-radius:8px}.idea-number{font-size:11px;color:var(--muted)}.idea-title{font-size:14px;font-weight:550;overflow-wrap:anywhere}.summary-assignee{font-size:12px;color:var(--muted);min-width:70px;text-align:right}.summary-badges{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.badge{border-radius:6px;padding:3px 8px;font-size:10px;font-weight:650;letter-spacing:.2px;background:#303640;color:#c7cdd7;white-space:nowrap}.badge.testing{background:#25374d;color:var(--blue)}.badge.completed,.badge.success{background:#213e34;color:#82e1bc}.badge.fail{background:#462b33;color:var(--red)}.badge.high{background:#493b27;color:var(--amber)}.badge.medium{background:#303745;color:#bdc7dc}.badge.low{background:#303640;color:#bdc5cf}.idea-body{padding:0 34px 20px 120px}.description,.notes{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.7;color:#c6ccd6}.description{margin:0 0 18px}.metadata{display:flex;flex-wrap:wrap;gap:15px 30px;margin:16px 0;font-size:12px}.metadata dt{color:var(--muted);font-size:11px;margin-bottom:5px}.metadata dd{margin:0}.result-block{padding:16px;background:#151a20;border:1px solid var(--border);border-radius:10px;margin:15px 0}.result-block h3{font-size:12px;margin-bottom:10px}.result-block p:last-child{margin-bottom:0}.idea-actions{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;border-top:1px solid var(--border);padding-top:15px}.idea-actions button{font-size:12px;padding:7px 10px}.empty{padding:50px 20px;text-align:center;border:1px dashed var(--border);border-radius:13px}.empty h3{margin-bottom:7px}.empty p{font-size:13px;margin-bottom:0}.footer{display:flex;justify-content:space-between;gap:16px;margin-top:30px;border-top:1px solid var(--border);padding-top:18px;font-size:11px;color:var(--muted)}
@@ -45,6 +46,26 @@
       </form>
       <p class="login-foot">Private workspace for Shibo, Yan, Junqi, and Yifan.<br>For account access or a password reset, contact your lab administrator.</p>
     </section>
+    <section id="onboarding-view" class="login" aria-labelledby="onboarding-heading" hidden>
+      <span class="eyebrow">PML4SC Lab</span><h1>AutoResearch<br>Idea Tracker</h1>
+      <h2 id="onboarding-heading">Verifying your invitation…</h2>
+      <p id="onboarding-message" role="status">Confirming your invitation link. This takes a moment.</p>
+      <p id="onboarding-notice" class="notice-text" role="alert" hidden></p>
+      <form id="password-form" novalidate hidden>
+        <label class="field">Account email<input id="onboarding-email" type="email" autocomplete="username" readonly></label>
+        <label class="field">New Password<input id="new-password" type="password" autocomplete="new-password" required><small>At least 8 characters. Any additional lab password rules are checked when you submit.</small></label>
+        <label class="field">Confirm Password<input id="confirm-password" type="password" autocomplete="new-password" required></label>
+        <label class="check"><input id="show-passwords" type="checkbox"> Show passwords</label>
+        <p id="password-error" class="error-text" role="alert"></p>
+        <button id="password-submit" type="submit" class="primary">Create Password</button>
+      </form>
+      <div class="onboarding-actions">
+        <button id="enter-tracker" type="button" class="primary" hidden>Enter the tracker</button>
+        <button id="retry-onboarding" type="button" hidden>Try again</button>
+        <button id="onboarding-signin" type="button" hidden>Go to sign in</button>
+        <button id="onboarding-logout" type="button" class="quiet" hidden>Log out</button>
+      </div>
+    </section>
     <section id="access-view" class="gate" hidden><span class="eyebrow">Workspace access</span><h1 id="access-title">Checking membership…</h1><p id="access-message">Loading your lab profile.</p><div class="actions" style="justify-content:center"><button id="retry-access">Try again</button><button id="access-logout">Log out</button></div></section>
     <div id="dashboard" hidden>
       <header class="page-heading"><div><div class="eyebrow" style="margin-bottom:12px">Research Idea Testing Dashboard</div><h1>AutoResearch Idea Tracker</h1><p>One lab. Shared ideas. Every experiment counts.</p></div><div class="account"><span class="avatar" id="avatar" aria-hidden="true"></span><div class="account-name"><div id="identity"></div><div class="small" id="role-label"></div></div><button id="logout" class="quiet">Log out</button></div></header>
@@ -68,9 +89,16 @@ const SUPABASE_URL = 'https://kgfybebpxpdkiouofyow.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_yqKiI7EJhNyA7KbB-b0cKQ_Ix03Vz62';
 const MAX_MARKDOWN_BYTES = 102400; // Must match ideas_description_check in schema.sql.
 const utf8Bytes = text => new TextEncoder().encode(text).byteLength;
+const MIN_PASSWORD_LENGTH = 8; // Keep at or above the Supabase Auth minimum password length.
+const MAX_PASSWORD_BYTES = 72; // Supabase Auth rejects longer passwords.
+const ONBOARDING_KEY = 'autoresearch.pendingOnboarding'; // Stores an Auth user ID only, never a password.
+const INVITATION_INVALID = 'This invitation link has expired or is invalid. Please contact the administrator for a new invitation.';
+const NOT_AUTHORIZED = 'Your account has been created, but access to this research workspace has not yet been authorized. Please contact the administrator.';
+const AUTH_CALLBACK_KEYS = ['access_token','refresh_token','expires_at','expires_in','token_type','provider_token','provider_refresh_token','token_hash','type','code','sb_flow_id','error','error_code','error_description','sb'];
 let markdownParser = null;
 const $ = id => document.getElementById(id);
 const state = {
+  onboarding: null, acceptingInvite: false, onboardingRetry: null,
   client: null, userId: null, profile: null, profiles: [], ideas: [], loaded: false,
   epoch: 0, pending: false, stale: false, live: false, channel: null,
   refreshTask: null, refreshAgain: false, refreshTimer: null, retryTimer: null,
@@ -277,6 +305,8 @@ async function boundedFetch(input, options = {}) {
 }
 function initializeSupabase() {
   if (!window.supabase) throw new Error('SDK unavailable');
+  // detectSessionInUrl stays off: invitation callbacks are handled exactly once
+  // by acceptInvitation(), never also by the SDK.
   return window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
     auth:{persistSession:true, autoRefreshToken:true, detectSessionInUrl:false},
     global:{fetch:boundedFetch}, realtime:{params:{eventsPerSecond:5}}
@@ -288,7 +318,9 @@ function updateConnection() {
   else if (state.profile) {
     const connected = state.live && !state.stale;
     label = connected ? 'Connected' : 'Reconnecting…'; kind = connected ? 'connected' : 'reconnecting';
-  } else if (state.userId) label = 'Checking access';
+  } else if (state.acceptingInvite) label = 'Verifying invitation';
+  else if (state.onboarding) label = 'Account setup';
+  else if (state.userId) label = 'Checking access';
   $('connection').textContent = label; $('connection').dataset.state = kind;
   const unavailable = !navigator.onLine || state.stale;
   $('sync-banner').hidden = !state.profile || (state.live && !unavailable);
@@ -316,6 +348,13 @@ function clearWorkspace() {
 }
 async function loadCurrentUser(session) {
   const nextId = session?.user?.id || null;
+  // The onboarding screen owns its session until the member chooses to continue:
+  // token refresh and USER_UPDATED events must not reset the form or skip ahead.
+  if (nextId && nextId === state.onboarding?.userId) return;
+  // An invited member who reloads before creating a password resumes setup.
+  if (nextId && nextId === pendingOnboarding()) { showPasswordSetup(session.user); return; }
+  if (pendingOnboarding()) setPendingOnboarding(null);
+  state.onboarding = null; state.onboardingRetry = null; $('onboarding-view').hidden = true;
   if (nextId && nextId === state.userId && state.profile) {
     if (session.access_token) void state.client.realtime.setAuth(session.access_token).catch(() => {});
     return;
@@ -353,13 +392,161 @@ async function loadCurrentUser(session) {
   } finally { if (epoch === state.epoch) $('retry-access').disabled = false; }
 }
 async function logout() {
-  const controls = [$('logout'), $('access-logout')]; controls.forEach(b => b.disabled = true);
+  const controls = [$('logout'), $('access-logout'), $('onboarding-logout')]; controls.forEach(b => b.disabled = true);
   try {
     const {error} = await state.client.auth.signOut({scope:'local'});
     if (error) throw error;
     await loadCurrentUser(null); $('password').value = ''; $('email').value = '';
+    $('password-form').reset(); setPasswordVisibility(false);
   } catch (error) { showNotification(friendlyError(error),true); }
   finally { controls.forEach(b => b.disabled = false); }
+}
+// Invitation onboarding. Members are invited from the Supabase Dashboard; this
+// page only accepts the link and lets them choose their own password. Workspace
+// access is still decided solely by the administrator-managed profiles table.
+function pendingOnboarding() { try { return window.localStorage.getItem(ONBOARDING_KEY); } catch { return null; } }
+function setPendingOnboarding(userId) {
+  try { if (userId) window.localStorage.setItem(ONBOARDING_KEY,userId); else window.localStorage.removeItem(ONBOARDING_KEY); } catch {}
+}
+// Supabase can return to the Site URL with ?token_hash=&type=invite (recommended
+// email template), #access_token=&type=invite (default template), ?code= (PKCE),
+// or error parameters in the query or fragment.
+function readAuthCallback() {
+  const query = new URLSearchParams(window.location.search), fragment = new URLSearchParams(window.location.hash.slice(1));
+  const value = key => fragment.get(key) || query.get(key) || null;
+  const callback = {
+    error: value('error_code') || value('error') || (value('error_description') ? 'unknown_error' : null),
+    tokenHash: value('token_hash'), code: query.get('code'), flowId: query.get('sb_flow_id'), type: value('type'),
+    accessToken: fragment.get('access_token'), refreshToken: fragment.get('refresh_token')
+  };
+  return callback.error || callback.tokenHash || callback.code || callback.accessToken ? callback : null;
+}
+// Remove one-time credentials from the address bar and history entry. The path
+// is preserved, so the GitHub Pages repository subpath is kept.
+function clearAuthCallbackURL() {
+  const url = new URL(window.location.href);
+  AUTH_CALLBACK_KEYS.forEach(key => url.searchParams.delete(key));
+  const fragment = new URLSearchParams(url.hash.slice(1));
+  if (AUTH_CALLBACK_KEYS.some(key => fragment.has(key))) {
+    AUTH_CALLBACK_KEYS.forEach(key => fragment.delete(key));
+    url.hash = fragment.toString();
+  }
+  window.history.replaceState(window.history.state,'',`${url.pathname}${url.search}${url.hash}`);
+}
+const isNetworkError = error => error?.name === 'AuthRetryableFetchError' || error?.status === 0 || error instanceof TypeError;
+function setOnboarding({heading, message, notice = '', form = false, enter = false, retry = null, signin = false, logout = ''}) {
+  $('login-view').hidden = true; $('access-view').hidden = true; $('dashboard').hidden = true; $('onboarding-view').hidden = false;
+  $('onboarding-heading').textContent = heading; $('onboarding-message').textContent = message;
+  $('onboarding-notice').textContent = notice; $('onboarding-notice').hidden = !notice;
+  $('password-form').hidden = !form; $('password-error').textContent = '';
+  $('enter-tracker').hidden = !enter; $('retry-onboarding').hidden = !retry; state.onboardingRetry = retry;
+  $('onboarding-signin').hidden = !signin; $('onboarding-logout').hidden = !logout; $('onboarding-logout').textContent = logout || 'Log out';
+  updateConnection();
+}
+async function acceptInvitation(callback) {
+  state.acceptingInvite = true;
+  setOnboarding({heading:'Verifying your invitation…', message:'Confirming your invitation link. This takes a moment.'});
+  let retryable = false;
+  try {
+    // Only invitation links are accepted. A PKCE code carries no type parameter.
+    if (callback.error || !(callback.type === 'invite' || (!callback.type && callback.code)) ||
+      (callback.accessToken && !callback.refreshToken)) throw new Error('Unsupported invitation callback');
+    const auth = state.client.auth;
+    const previous = (await auth.getSession()).data?.session?.user || null;
+    // Each one-time credential is submitted once. The SDK's own URL detection is
+    // disabled, so it cannot exchange the same code a second time.
+    const {data,error} = callback.tokenHash ? await auth.verifyOtp({token_hash:callback.tokenHash,type:'invite'}) :
+      callback.accessToken ? await auth.setSession({access_token:callback.accessToken,refresh_token:callback.refreshToken}) :
+      await auth.exchangeCodeForSession(callback.code,callback.flowId ? {flowId:callback.flowId} : undefined);
+    if (error) { retryable = isNetworkError(error) || error.status === 429; throw error; }
+    const user = data?.session?.user || data?.user;
+    if (!data?.session || !user?.id) throw new Error('Invitation did not establish a session');
+    setPendingOnboarding(user.id);
+    state.acceptingInvite = false;
+    showPasswordSetup(user, previous && previous.id !== user.id ?
+      `You were signed out of ${previous.email || 'another account'} to accept this invitation.` : '');
+  } catch (error) {
+    state.acceptingInvite = false;
+    setOnboarding({heading:'Invitation not accepted',
+      message:!retryable ? INVITATION_INVALID : error.status === 429 ? 'Too many attempts. Wait a moment, then try again.' : 'Unable to reach the sign-in service. Check your connection and try again.',
+      retry:retryable ? () => acceptInvitation(callback) : null, signin:true});
+  }
+}
+function showPasswordSetup(user, notice = '') {
+  clearWorkspace(); state.userId = user.id; state.onboarding = {userId:user.id};
+  $('password-form').reset(); setPasswordVisibility(false); $('onboarding-email').value = user.email || '';
+  setOnboarding({heading:'Set Your Password', message:'Welcome to PML4SC Lab! Your invitation has been verified.', notice, form:true, logout:'Cancel and log out'});
+  $('new-password').focus();
+}
+function setPasswordVisibility(visible) {
+  $('show-passwords').checked = visible;
+  for (const id of ['new-password','confirm-password']) $(id).type = visible ? 'text' : 'password';
+}
+function passwordProblem(password, confirmation) {
+  if (!password) return 'Enter a new password.';
+  if (password.length < MIN_PASSWORD_LENGTH) return `Use at least ${MIN_PASSWORD_LENGTH} characters.`;
+  if (utf8Bytes(password) > MAX_PASSWORD_BYTES) return `Use a shorter password: at most ${MAX_PASSWORD_BYTES} bytes (accented characters and emoji count as several).`;
+  if (!confirmation) return 'Confirm your new password.';
+  if (password !== confirmation) return 'The passwords do not match.';
+  return '';
+}
+// Never echoes the password or any token.
+function passwordErrorMessage(error) {
+  const code = error?.code || '';
+  if (code === 'weak_password' || error?.name === 'AuthWeakPasswordError') {
+    return error.reasons?.includes('pwned') ? 'This password appears in a known data breach. Choose a different password.' :
+      `${error.message || 'This password is too weak.'} Choose a stronger password.`;
+  }
+  if (code === 'same_password') return 'Choose a password different from your current one.';
+  if (error?.name === 'AuthSessionMissingError' || error?.status === 401 || ['session_not_found','session_expired','bad_jwt','reauthentication_needed','user_not_found'].includes(code)) {
+    return 'Your invitation session has ended. Please contact the administrator for a new invitation.';
+  }
+  if (isNetworkError(error)) return 'Unable to reach the sign-in service. Check your connection and try again.';
+  if (error?.status === 429) return 'Too many attempts. Wait a moment and try again.';
+  if (error?.status === 422 && error.message) return error.message;
+  return 'Your password could not be created. Try again, or contact the administrator if the problem continues.';
+}
+async function createPassword(event) {
+  event.preventDefault();
+  const submit = $('password-submit'), userId = state.onboarding?.userId;
+  if (submit.disabled || !userId) return;
+  const password = $('new-password').value, problem = passwordProblem(password,$('confirm-password').value);
+  $('password-error').textContent = problem;
+  if (problem) return;
+  submit.disabled = true; submit.textContent = 'Creating password…';
+  try {
+    // Only update the password of the session this invitation established.
+    const {data,error} = await state.client.auth.getSession();
+    if (error) throw error;
+    if (data.session?.user?.id !== userId) throw Object.assign(new Error('Auth session missing!'),{name:'AuthSessionMissingError'});
+    const {error:updateError} = await state.client.auth.updateUser({password});
+    if (updateError) throw updateError;
+    if (state.onboarding?.userId !== userId) return;
+    setPendingOnboarding(null); $('password-form').reset(); setPasswordVisibility(false);
+    void showOnboardingResult(userId);
+  } catch (error) {
+    if (state.onboarding?.userId === userId) $('password-error').textContent = passwordErrorMessage(error);
+  } finally { submit.disabled = false; submit.textContent = 'Create Password'; }
+}
+async function showOnboardingResult(userId) {
+  const done = 'Your password has been created successfully.';
+  setOnboarding({heading:'Password created', message:done, notice:'Checking workspace access…'});
+  try {
+    const {data,error} = await state.client.from('profiles').select('id,display_name,role,active').eq('id',userId).maybeSingle();
+    if (state.onboarding?.userId !== userId) return;
+    if (error) throw error;
+    // Authentication alone never grants access: only an active profile does.
+    if (data?.active) setOnboarding({heading:`Welcome, ${data.display_name}`, message:`${done} From now on, sign in with your email and this password.`, enter:true});
+    else setOnboarding({heading:'Password created', message:done, notice:NOT_AUTHORIZED, logout:'Log out'});
+  } catch (error) {
+    if (state.onboarding?.userId !== userId) return;
+    setOnboarding({heading:'Password created', message:done, notice:friendlyError(error), retry:() => showOnboardingResult(userId), logout:'Log out'});
+  }
+}
+async function continueFromOnboarding() {
+  state.onboarding = null; state.onboardingRetry = null;
+  const {data,error} = await state.client.auth.getSession();
+  await loadCurrentUser(error ? null : data.session);
 }
 async function fetchAllIdeas() {
   const records = [], size = 500;
@@ -784,6 +971,11 @@ function bindInterface() {
     finally { $('login-submit').disabled = false; $('login-submit').textContent = 'Sign in'; }
   });
   $('logout').addEventListener('click',logout); $('access-logout').addEventListener('click',logout);
+  $('password-form').addEventListener('submit',createPassword);
+  $('show-passwords').addEventListener('change',() => setPasswordVisibility($('show-passwords').checked));
+  $('onboarding-logout').addEventListener('click',logout);
+  $('retry-onboarding').addEventListener('click',() => void state.onboardingRetry?.());
+  for (const id of ['enter-tracker','onboarding-signin']) $(id).addEventListener('click',() => void continueFromOnboarding());
   $('retry-access').addEventListener('click',async () => {
     const {data,error} = await state.client.auth.getSession();
     if (error) { showNotification(friendlyError(error),true); return; }
@@ -806,18 +998,30 @@ function bindInterface() {
 }
 async function initializeApp() {
   bindInterface();
+  const callback = readAuthCallback();
   try {
     state.client = initializeSupabase();
+    // While an invitation callback is being accepted, ignore Auth events so the
+    // member is never routed to the login page or a previous account's workspace.
+    // acceptInvitation() routes explicitly once the callback has been handled, so
+    // INITIAL_SESSION (whose timing is not guaranteed) is ignored on such loads.
+    if (callback) state.acceptingInvite = true;
     // Never await other SDK calls inside the Auth callback (its internal lock is
     // still held). Defer work and guard subsequent responses with session epochs.
-    state.client.auth.onAuthStateChange((_event,session) => {
-      setTimeout(() => void loadCurrentUser(session),0);
+    state.client.auth.onAuthStateChange((event,session) => {
+      if (state.acceptingInvite || (callback && event === 'INITIAL_SESSION')) return;
+      setTimeout(() => { if (!state.acceptingInvite) void loadCurrentUser(session); },0);
     });
     // INITIAL_SESSION from the SDK handles persisted sessions as well as null.
   } catch {
-    $('login-error').textContent = 'The sign-in library could not load. Check your connection, allow cdn.jsdelivr.net, and reload this page.';
+    const message = 'The sign-in library could not load. Check your connection, allow cdn.jsdelivr.net, and reload this page.';
+    $('login-error').textContent = message;
     $('login-submit').textContent = 'Sign-in unavailable'; $('login-submit').disabled = true;
+    // The callback stays in the address bar here, so reloading can still accept it.
+    if (callback) setOnboarding({heading:'Invitation not accepted', message});
+    return;
   }
+  if (callback) { clearAuthCallbackURL(); void acceptInvitation(callback); }
 }
 window.addEventListener('DOMContentLoaded',initializeApp);
 </script>
