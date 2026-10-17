@@ -1,0 +1,15 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.log
+node_modules/
+.supabase/
+supabase/.temp/
+coverage/
+test-results/
+playwright-report/
+.vscode/
+*.local.*

@@ -1,0 +1,825 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101216">
+  <meta name="description" content="The PML4SC Lab workspace for shared research ideas, experiment progress, and results.">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net/npm/katex@0.19.0/dist/fonts/; connect-src https://kgfybebpxpdkiouofyow.supabase.co wss://kgfybebpxpdkiouofyow.supabase.co; img-src 'self' data:; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <title>AutoResearch Idea Tracker · PML4SC Lab</title>
+  <style>
+    :root{color-scheme:dark;--bg:#101216;--card:#1c2027;--raised:#252b34;--border:#343945;--text:#f5f5f7;--muted:#a5acba;--accent:#3ccca9;--blue:#90bfff;--red:#ff969c;--amber:#f3cd82}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.5}button,input,select,textarea{font:inherit}button,a,input,select,textarea,summary{ -webkit-tap-highlight-color:transparent}button,select,summary{cursor:pointer}button,input,select,textarea{border:1px solid var(--border);border-radius:9px;background:var(--raised);color:var(--text);padding:10px 13px}button{font-size:13px;font-weight:600;transition:border-color .15s,background .15s}button:hover:not(:disabled){border-color:var(--accent);background:#2d383e}button:disabled{opacity:.45;cursor:wait}.primary{background:var(--accent);border-color:var(--accent);color:#09291f}.primary:hover:not(:disabled){background:#64dfbd;color:#09291f}.danger{color:var(--red)}.quiet{background:transparent}a{color:#7ee6c7;text-underline-offset:3px;overflow-wrap:anywhere}:focus-visible{outline:2px solid var(--accent);outline-offset:4px}h1,h2,h3,p{margin-top:0}h1{font-size:clamp(25px,3.2vw,36px);line-height:1.2;letter-spacing:-1.1px;margin-bottom:10px}h2{font-size:19px;letter-spacing:-.3px}h3{font-size:16px}p{color:var(--muted)}[hidden]{display:none!important}.muted,.small{color:var(--muted)}.small{font-size:12px}.eyebrow{text-transform:uppercase;font-size:11px;letter-spacing:2px;font-weight:700;color:var(--accent)}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.skip{position:absolute;top:-80px;left:15px;background:var(--card);padding:12px;z-index:20}.skip:focus{top:10px}
+    .topbar{border-bottom:1px solid var(--border);padding:17px max(24px,calc((100% - 1180px)/2));display:flex;align-items:center;justify-content:space-between;gap:16px;background:#14171c}.brand{display:flex;align-items:center;gap:11px;font-weight:700;font-size:14px;letter-spacing:.3px}.brand-icon{display:grid;place-items:center;width:30px;height:30px;border:1px solid #386153;border-radius:8px;background:#1b352d;color:var(--accent);font-size:20px}.connection{font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center}.connection:before{content:'';height:7px;width:7px;background:var(--muted);border-radius:50%;flex:none}.connection[data-state=connected]:before{background:var(--accent);box-shadow:0 0 10px #3ccca933}.connection[data-state=reconnecting]:before{background:var(--amber)}.connection[data-state=offline]:before{background:var(--red)}
+    main{max-width:1228px;margin:0 auto;padding:40px 24px 60px}.page-heading{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:30px}.page-heading p{margin-bottom:0}.account{display:flex;align-items:center;gap:14px}.account-name{text-align:right;font-size:13px}.avatar{width:36px;height:36px;display:grid;place-items:center;border-radius:50%;background:#253d36;color:#94ebd1;font-weight:700}.actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+    .login{max-width:440px;margin:7vh auto 12vh;background:var(--card);border:1px solid var(--border);border-radius:18px;padding:32px}.login h1{font-size:28px;margin-top:20px}.login p{font-size:14px}.login .primary{width:100%;padding:12px;margin-top:8px}.login-foot{border-top:1px solid var(--border);padding-top:20px;margin:24px 0 0!important;font-size:12px!important}.field{display:grid;gap:7px;margin:16px 0;font-size:13px;font-weight:600}.field small{font-weight:400;color:var(--muted)}input,textarea,select{width:100%;min-width:0;font-size:14px}textarea{resize:vertical;min-height:115px}.error-text{font-size:13px;color:var(--red);white-space:pre-wrap}.gate{max-width:550px;margin:9vh auto;text-align:center}.gate p{white-space:pre-wrap}
+    .overview{border:1px solid var(--border);background:var(--card);border-radius:16px;overflow:hidden;margin-bottom:28px}.overview-head{display:flex;justify-content:space-between;gap:16px;padding:19px 22px;border-bottom:1px solid var(--border)}.overview-head h2{margin:0;font-size:14px}.stats{display:grid;grid-template-columns:repeat(6,1fr);padding:22px 10px}.stat{padding:0 20px;border-right:1px solid var(--border)}.stat:last-child{border:0}.stat-label{font-size:12px;color:var(--muted);margin-bottom:5px}.stat-value{font-size:30px;font-weight:650;letter-spacing:-1px}.stat[data-kind=testing] .stat-value{color:var(--blue)}.stat[data-kind=completed] .stat-value,.stat[data-kind=success] .stat-value{color:var(--accent)}.stat[data-kind=fail] .stat-value{color:var(--red)}.progress-area{padding:0 22px 22px}.progress-label{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--muted);margin-bottom:10px}.progress-track{height:7px;background:#303640;border-radius:20px;overflow:hidden}.progress-fill{height:100%;width:0;background:linear-gradient(90deg,#239b7f,#63e4bb);transition:width .2s}
+    .section-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:17px}.section-heading h2{margin:0}.section-heading .small{margin-left:9px;font-weight:400}.filters{border:1px solid var(--border);background:#191d23;border-radius:13px;padding:16px;margin-bottom:14px}.search-row{display:grid;grid-template-columns:1fr 180px;gap:12px}.search-input{background:#101419}.filter-row{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:12px}.filter-row label,.search-row label{font-size:11px;color:var(--muted);display:grid;gap:6px}.filter-row select,.search-row select{font-size:12px;padding:9px}.toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:14px 0 19px}.toolbar button{padding:7px 10px;font-size:12px}.banner{padding:13px 16px;border:1px solid #695b38;background:#2b261b;color:#f3d697;border-radius:9px;font-size:13px;margin-bottom:20px}
+    .week{border:1px solid var(--border);border-radius:13px;background:var(--card);margin-bottom:16px;overflow:hidden}.week>summary{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:18px 20px;list-style:none}.week>summary::-webkit-details-marker,.idea>summary::-webkit-details-marker{display:none}.week>summary:hover{background:#222831}.week-title{display:flex;gap:12px;align-items:center}.chevron{display:inline-block;color:var(--muted);font-size:12px;transition:transform .15s}.week:not([open])>summary .chevron,.idea:not([open])>summary .chevron{transform:rotate(-90deg)}.week-name{font-size:14px;font-weight:650}.week-meta{font-size:12px;color:var(--muted);white-space:nowrap}.week-ideas{padding:0 12px 12px}.idea{border-top:1px solid var(--border)}.idea>summary{list-style:none;display:grid;grid-template-columns:15px 84px minmax(0,1fr) auto auto;align-items:center;gap:12px;padding:17px 9px;min-height:65px}.idea>summary:hover{background:#222831;border-radius:8px}.idea-number{font-size:11px;color:var(--muted)}.idea-title{font-size:14px;font-weight:550;overflow-wrap:anywhere}.summary-assignee{font-size:12px;color:var(--muted);min-width:70px;text-align:right}.summary-badges{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.badge{border-radius:6px;padding:3px 8px;font-size:10px;font-weight:650;letter-spacing:.2px;background:#303640;color:#c7cdd7;white-space:nowrap}.badge.testing{background:#25374d;color:var(--blue)}.badge.completed,.badge.success{background:#213e34;color:#82e1bc}.badge.fail{background:#462b33;color:var(--red)}.badge.high{background:#493b27;color:var(--amber)}.badge.medium{background:#303745;color:#bdc7dc}.badge.low{background:#303640;color:#bdc5cf}.idea-body{padding:0 34px 20px 120px}.description,.notes{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.7;color:#c6ccd6}.description{margin:0 0 18px}.metadata{display:flex;flex-wrap:wrap;gap:15px 30px;margin:16px 0;font-size:12px}.metadata dt{color:var(--muted);font-size:11px;margin-bottom:5px}.metadata dd{margin:0}.result-block{padding:16px;background:#151a20;border:1px solid var(--border);border-radius:10px;margin:15px 0}.result-block h3{font-size:12px;margin-bottom:10px}.result-block p:last-child{margin-bottom:0}.idea-actions{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;border-top:1px solid var(--border);padding-top:15px}.idea-actions button{font-size:12px;padding:7px 10px}.empty{padding:50px 20px;text-align:center;border:1px dashed var(--border);border-radius:13px}.empty h3{margin-bottom:7px}.empty p{font-size:13px;margin-bottom:0}.footer{display:flex;justify-content:space-between;gap:16px;margin-top:30px;border-top:1px solid var(--border);padding-top:18px;font-size:11px;color:var(--muted)}
+    dialog{color:var(--text);background:var(--card);border:1px solid #47505f;border-radius:16px;padding:0;width:min(590px,calc(100% - 28px));max-height:88vh;box-shadow:0 25px 100px #0008}dialog::backdrop{background:#080b10b8;backdrop-filter:blur(4px)}.dialog-head{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:20px 24px;border-bottom:1px solid var(--border)}.dialog-head h2{margin:0}.dialog-head button{padding:5px 10px;font-size:17px}.dialog-body{padding:5px 24px 22px}.dialog-context{font-size:13px;color:var(--muted);margin-top:17px;overflow-wrap:anywhere}.form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}.dialog-actions{display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--border);padding-top:18px;margin-top:22px}fieldset{border:0;padding:0;margin:20px 0}legend{font-size:13px;font-weight:600;margin-bottom:10px}.radio-options{display:flex;gap:12px}.radio-option{display:flex;align-items:center;gap:10px;padding:12px 20px;border:1px solid var(--border);border-radius:8px;flex:1;font-size:14px}.radio-option input{width:auto;accent-color:var(--accent)}.history{list-style:none;padding:0}.history li{padding:15px 0;border-bottom:1px solid var(--border);font-size:13px}.history li p{margin:7px 0;font-size:12px}.history time{display:block;color:var(--muted);font-size:11px;margin:5px 0}.snapshot{margin-top:10px}.snapshot summary{font-size:12px;color:var(--muted)}.snapshot pre{font:12px/1.6 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:#11161b;padding:12px;border-radius:8px}.notifications{position:fixed;bottom:24px;right:24px;width:min(410px,calc(100% - 32px));z-index:100;display:grid;gap:9px}.notification{border:1px solid #376152;background:#1d302a;color:#d8f9eb;border-radius:11px;padding:13px 15px;box-shadow:0 5px 25px #0005;font-size:13px;display:flex;gap:12px;align-items:center;justify-content:space-between}.notification.error{border-color:#80505a;background:#38242b;color:#ffd9df}.notification button{padding:0 5px;background:transparent;border:0;font-size:18px;color:inherit}
+    @media(max-width:800px){.page-heading{align-items:flex-start}.account-name .small{display:none}.avatar{display:none}.stats{grid-template-columns:repeat(3,1fr);row-gap:22px}.stat:nth-child(3){border:0}.stat-value{font-size:27px}.filter-row{grid-template-columns:repeat(3,1fr)}.idea>summary{grid-template-columns:12px 77px minmax(0,1fr) auto;gap:9px}.summary-assignee{display:none}.idea-body{padding:0 18px 20px 24px}.week-meta{font-size:11px}.summary-badges{flex-direction:column}.topbar{padding:15px 20px}}
+    @media(max-width:520px){main{padding:25px 16px 40px}.page-heading{flex-direction:column;gap:18px}.account{width:100%;justify-content:space-between}.account-name{text-align:left}.page-heading h1{font-size:27px}.topbar{padding:14px 16px}.brand{font-size:12px}.connection{font-size:10px}.stats{padding:20px 0}.stat{padding:0 16px}.overview-head{padding:16px}.progress-area{padding:0 16px 20px}.search-row{grid-template-columns:1fr}.filter-row{grid-template-columns:1fr 1fr}.toolbar{align-items:flex-start;flex-direction:column}.week>summary{padding:16px 13px;align-items:flex-start}.week-meta{max-width:80px;text-align:right}.week-name{font-size:12px}.week-ideas{padding:0 8px 8px}.idea>summary{grid-template-columns:12px minmax(0,1fr) auto;gap:8px;padding:14px 5px}.idea-number{grid-column:2;grid-row:1}.idea-title{grid-column:2;grid-row:2;font-size:13px}.idea>summary>.chevron{grid-row:1/3}.summary-badges{grid-column:3;grid-row:1/3}.idea-body{padding-left:25px;padding-right:8px}.section-heading{align-items:flex-start}.section-heading .small{display:block;margin-left:0;margin-top:3px}.section-heading .actions{justify-content:flex-end}.section-heading button{font-size:11px}.login{margin:4vh auto;padding:25px}.dialog-body{padding:5px 18px 18px}.dialog-head{padding:17px 18px}.footer{flex-direction:column;gap:5px}.notifications{right:16px;bottom:16px}.form-row{gap:12px}}
+    .markdown-body{white-space:normal;overflow-wrap:anywhere;min-width:0;font-size:14px;line-height:1.7;color:#c6ccd6}.markdown-body>:first-child{margin-top:0}.markdown-body>:last-child{margin-bottom:0}.markdown-body h1{font-size:24px;letter-spacing:-.4px}.markdown-body h2{font-size:20px}.markdown-body h3{font-size:17px}.markdown-body h1,.markdown-body h2,.markdown-body h3,.markdown-body h4{margin-top:1.3em;color:var(--text);line-height:1.4}.markdown-body p{color:inherit;margin:0 0 1em}.markdown-body ul,.markdown-body ol{padding-left:25px}.markdown-body blockquote{margin:16px 0;padding-left:15px;border-left:3px solid var(--accent);color:var(--muted)}.markdown-body pre{white-space:pre;overflow-x:auto;max-width:100%;padding:14px;background:#101419;border:1px solid var(--border);border-radius:8px}.markdown-body code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.88em;background:#101419;border-radius:4px;padding:2px 5px}.markdown-body pre code{padding:0}.markdown-body table{display:block;overflow-x:auto;border-collapse:collapse;max-width:100%;margin:16px 0}.markdown-body th,.markdown-body td{padding:8px 12px;border:1px solid var(--border);min-width:90px}.markdown-body th{background:var(--raised);text-align:left}.markdown-body hr{border:0;border-top:1px solid var(--border);margin:20px 0}.markdown-body .katex-display{overflow-x:auto;overflow-y:hidden;padding:6px 0;max-width:100%}.markdown-body .markdown-source{white-space:pre-wrap;overflow-wrap:anywhere}.markdown-notice{font-size:12px!important;color:var(--amber)!important}.markdown-editor .field{margin-top:12px}.markdown-editor textarea{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;min-height:230px;font-size:12px;line-height:1.6}.markdown-editor .markdown-preview{padding:16px;border:1px solid var(--border);border-radius:9px;background:#151a20;max-height:340px;overflow:auto;margin-top:8px}.markdown-preview-label{font-size:12px;font-weight:600;margin-top:18px}.markdown-size{font-weight:400;color:var(--muted);font-size:12px;margin-top:7px}.markdown-import{padding:14px;border:1px dashed var(--border);border-radius:10px;margin:17px 0}.markdown-import label{margin:0}.markdown-import input{font-size:12px}.markdown-import p{font-size:12px;margin:8px 0 0}.markdown-editor-dialog{width:min(1000px,calc(100% - 28px))}.markdown-workspace{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}.markdown-workspace textarea{min-height:300px}.markdown-workspace .markdown-preview{height:300px;max-height:300px}.markdown-workspace .markdown-preview-label{margin-top:12px;line-height:19.5px}@media(max-width:700px){.markdown-workspace{grid-template-columns:minmax(0,1fr);gap:0}.markdown-workspace textarea{min-height:220px}}
+    @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+  </style>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.19.0/dist/katex.min.css" integrity="sha384-3rdsX6e5mueWyoweR9NIVmtEsUkokpBT/0ALqKKIBMr9j4qhHkaIkAcGgsE6uVlp" crossorigin="anonymous">
+  <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js" integrity="sha384-TcHRA3zBbn+Lexh5n+Oil4guNPOS3rjNDpGRAN46u/s/mB2IZ50ceC6TYDU2yvgK" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/markdown-it@15.0.3/dist/browser/markdown-it.umd.min.js" integrity="sha384-ARStLecQmtLYjBgfD3+w+irhiSoLTnFk/ne6c0gRWQKQtC9791ZLMQ9D3OaBISt3" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/dompurify@3.4.17/dist/purify.min.js" integrity="sha384-P0JNneQf81HOl9VwNXK76cQ9VMD6Nfsnepxb0cCOg8+UzEdzgPHAPV4wVQrvYQSx" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.19.0/dist/katex.min.js" integrity="sha384-QFFtAGzvvj+bfgCGxXJlNZZR1nXEZgvG8tDLCCY1F19xl20WlfTYgguB4VcNdxYk" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/markdown-it-texmath@1.0.0/texmath.js" integrity="sha384-ERKA1vEP+gG9/lHJfiz8Hjv1ZlDRqWpaPFNKHqR484Etc2xBJJXI7G548ptjx8Fr" crossorigin="anonymous"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="topbar"><div class="brand"><span class="brand-icon" aria-hidden="true">⌘</span>PML4SC <span class="muted">/</span> RESEARCH WORKSPACE</div><span id="connection" class="connection" role="status" data-state="idle">Signed out</span></div>
+  <main id="main">
+    <section id="login-view" class="login" aria-labelledby="login-title">
+      <span class="eyebrow">PML4SC Lab</span><h1 id="login-title">AutoResearch<br>Idea Tracker</h1>
+      <p>A shared space to turn research ideas into experiments, and experiments into insight.</p>
+      <form id="login-form">
+        <label class="field">Email<input id="email" type="email" autocomplete="username" required maxlength="254" placeholder="Your lab account email"></label>
+        <label class="field">Password<input id="password" type="password" autocomplete="current-password" required></label>
+        <p id="login-error" class="error-text" role="alert"></p>
+        <button id="login-submit" type="submit" class="primary" disabled>Checking session…</button>
+      </form>
+      <p class="login-foot">Private workspace for Shibo, Yan, Junqi, and Yifan.<br>For account access or a password reset, contact your lab administrator.</p>
+    </section>
+    <section id="access-view" class="gate" hidden><span class="eyebrow">Workspace access</span><h1 id="access-title">Checking membership…</h1><p id="access-message">Loading your lab profile.</p><div class="actions" style="justify-content:center"><button id="retry-access">Try again</button><button id="access-logout">Log out</button></div></section>
+    <div id="dashboard" hidden>
+      <header class="page-heading"><div><div class="eyebrow" style="margin-bottom:12px">Research Idea Testing Dashboard</div><h1>AutoResearch Idea Tracker</h1><p>One lab. Shared ideas. Every experiment counts.</p></div><div class="account"><span class="avatar" id="avatar" aria-hidden="true"></span><div class="account-name"><div id="identity"></div><div class="small" id="role-label"></div></div><button id="logout" class="quiet">Log out</button></div></header>
+      <div id="sync-banner" class="banner" role="status" hidden></div>
+      <section class="overview" aria-labelledby="overview-title"><div class="overview-head"><h2 id="overview-title">Lab overview</h2><span class="small">All weeks · All ideas</span></div><div id="stats" class="stats"></div><div class="progress-area"><div class="progress-label"><span id="progress-text">Loading progress…</span><span id="progress-percent">—</span></div><div id="progress" class="progress-track" role="progressbar" aria-label="Overall completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progress-fill" class="progress-fill"></div></div></div></section>
+      <section aria-labelledby="ideas-title"><div class="section-heading"><h2 id="ideas-title">Research ideas <span id="visible-count" class="small"></span></h2><div class="actions"><button id="activity-button" class="quiet">Activity history</button><button id="create-button" class="primary" data-mutation hidden>+ Publish idea</button></div></div>
+        <div class="filters"><div class="search-row"><label>SEARCH IDEAS<input id="search" class="search-input" type="search" placeholder="Search number, title, or description…" autocomplete="off"></label><label>SORT BY<select id="sort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="number">Idea number ↑</option></select></label></div><div class="filter-row"><label>WEEK<select id="week-filter"><option value="">All weeks</option></select></label><label>STATUS<select id="status-filter"><option value="">All statuses</option><option value="available">Available</option><option value="testing">Testing</option><option value="completed">Completed</option></select></label><label>ASSIGNED TO<select id="member-filter"><option value="">All members</option><option value="unassigned">Unassigned</option></select></label><label>RESULT<select id="result-filter"><option value="">All results</option><option value="success">Success</option><option value="fail">Fail</option><option value="none">No result</option></select></label><label>PRIORITY<select id="priority-filter"><option value="">All priorities</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label></div></div>
+        <div class="toolbar"><div class="actions"><button id="expand-all" class="quiet">Expand all</button><button id="collapse-all" class="quiet">Collapse all</button><button id="clear-filters" class="quiet">Clear filters</button></div><div class="actions"><span id="last-synced" class="small" role="status">Waiting for data</span><button id="refresh" class="quiet">↻ Refresh</button></div></div>
+        <div id="ideas" aria-busy="true"></div>
+      </section>
+      <footer class="footer"><span>PML4SC Lab · AutoResearch Agent System</span><span>Shared progress. Preserved results.</span></footer>
+    </div>
+  </main>
+  <dialog id="modal" aria-labelledby="modal-title"><div class="dialog-head"><h2 id="modal-title"></h2><button id="modal-close" type="button" aria-label="Close dialog">×</button></div><div id="modal-body" class="dialog-body"></div></dialog>
+  <div id="notifications" class="notifications" aria-live="polite" aria-relevant="additions"></div>
+  <noscript><p style="text-align:center">JavaScript is required to sign in and use this workspace.</p></noscript>
+<script>
+'use strict';
+// Public frontend configuration only. Authorization lives in PostgreSQL.
+const SUPABASE_URL = 'https://kgfybebpxpdkiouofyow.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_yqKiI7EJhNyA7KbB-b0cKQ_Ix03Vz62';
+const MAX_MARKDOWN_BYTES = 102400; // Must match ideas_description_check in schema.sql.
+const utf8Bytes = text => new TextEncoder().encode(text).byteLength;
+let markdownParser = null;
+const $ = id => document.getElementById(id);
+const state = {
+  client: null, userId: null, profile: null, profiles: [], ideas: [], loaded: false,
+  epoch: 0, pending: false, stale: false, live: false, channel: null,
+  refreshTask: null, refreshAgain: false, refreshTimer: null, retryTimer: null,
+  retryDelay: 2000, pollTimer: null, history: null, historyVersion: 0,
+  weekOpen: new Map(), ideaOpen: new Map(), modalOpener: null
+};
+const filterIds = ['search','sort','week-filter','status-filter','member-filter','result-filter','priority-filter'];
+const titleCase = value => value ? value[0].toUpperCase() + value.slice(1) : '—';
+const ideaNumber = value => `IDEA-${String(value).padStart(3, '0')}`;
+const memberName = id => state.profiles.find(p => p.id === id)?.display_name || (id ? 'Former member' : 'Unassigned');
+const isPI = () => state.profile?.role === 'pi';
+function node(tag, className, text) {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  if (text !== undefined) element.textContent = text;
+  return element;
+}
+function button(text, className, handler, mutation = false) {
+  const element = node('button', className, text);
+  element.type = 'button';
+  element.addEventListener('click', handler);
+  if (mutation) element.dataset.mutation = '';
+  return element;
+}
+function badge(value) { return node('span', `badge ${value}`, titleCase(value)); }
+function dateText(value, withTime = false) {
+  if (!value) return '—';
+  const date = new Date(withTime ? value : `${value}T12:00:00`);
+  return new Intl.DateTimeFormat(undefined, {year:'numeric',month:'short',day:'numeric', ...(withTime ? {hour:'numeric',minute:'2-digit'} : {})}).format(date);
+}
+function currentMonday() {
+  const date = new Date();
+  date.setDate(date.getDate() - (date.getDay() + 6) % 7);
+  return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+}
+function safeURL(value) {
+  try { const url = new URL(value); return ['https:', 'http:'].includes(url.protocol) && url.hostname ? url.href : null; }
+  catch { return null; }
+}
+// Adapt only this parser instance; leave the pinned plugin/global presets intact.
+// texmath 1.0.0's dollar regex rejects escaped dollars, and its block rule
+// advances past the closing LINE even when the match ends before trailing prose.
+function fixDollarMath(parser) {
+  const display = /\$\$((?:\\[\s\S]|[^\\$]|\$(?!\$))+?)\$\$/gy;
+  const inline = /\$((?:\\[^\r\n]|[^\\$\r\n])+?)\$/gy;
+  const numbered = /\$\$((?:\\[\s\S]|[^\\$]|\$(?!\$))+?)\$\$[ \t]*\(([^)\r\n]+?)\)/gy;
+  const escaped = (text,pos) => {
+    let slashes = 0;
+    while (pos > 0 && text[--pos] === '\\') slashes++;
+    return slashes % 2 === 1;
+  };
+  for (const original of window.texmath.rules.dollars.inline) {
+    const isDisplay = original.name === 'math_inline_double';
+    const rule = {...original, rex:isDisplay ? display : inline,
+      pre:(text,space,pos) => !escaped(text,pos) && (isDisplay ||
+        (text[pos+1] !== '$' && !/\s/.test(text[pos+1] || '') && !/\d/.test(text[pos-1] || ''))),
+      post:(text,space,pos) => isDisplay ||
+        (!/\s/.test(text[pos-1] || '') && !/\d/.test(text[pos+1] || ''))};
+    parser.inline.ruler.at(rule.name,window.texmath.inline(rule));
+  }
+  for (const original of window.texmath.rules.dollars.block) {
+    const rule = {...original,rex:original.name === 'math_block_eqno' ? numbered : display};
+    const parseBlock = window.texmath.block(rule);
+    parser.block.ruler.at(rule.name,(state,startLine,endLine,silent) => {
+      rule.rex.lastIndex = state.bMarks[startLine] + state.tShift[startLine];
+      if (!rule.rex.exec(state.src)) return false;
+      const end = rule.rex.lastIndex;
+      // A nested list/quote parser must not consume content beyond its boundary.
+      if (endLine <= startLine || end > state.eMarks[endLine-1]) return false;
+      if (!parseBlock(state,startLine,endLine,silent)) return false;
+      if (!silent) {
+        const tail = state.src.slice(end,state.eMarks[state.line-1]);
+        if (tail.trim()) {
+          // Tokenize the remaining Markdown normally, including further equations
+          // and links. Never discard the rest of the closing line or alter source.
+          state.push('paragraph_open','p',1);
+          const token = state.push('inline','',0);
+          token.content = tail; token.children = [];
+          state.push('paragraph_close','p',-1);
+        }
+      }
+      return true;
+    });
+  }
+}
+function getMarkdownParser() {
+  if (!window.markdownit || !window.DOMPurify?.isSupported || !window.katex || !window.texmath) return null;
+  if (markdownParser) return markdownParser;
+  markdownParser = window.markdownit({html:false,linkify:true,typographer:false,breaks:false});
+  markdownParser.use(window.texmath, {
+    delimiters:'dollars',
+    engine:{renderToString(source, options) {
+      // A fresh macro dictionary for EVERY expression prevents definitions from
+      // leaking into other ideas/previews. Never enable trusted HTML/URL commands.
+      return window.katex.renderToString(source, {...options,trust:false,throwOnError:false,
+        strict:'ignore',maxExpand:200,maxSize:20,macros:Object.create(null)});
+    }}
+  });
+  fixDollarMath(markdownParser);
+  // Local Markdown files have no hosted asset base. Do not fetch tracking images
+  // or attempt uploads; retain the original image syntax in the stored source.
+  markdownParser.renderer.rules.image = (tokens,index) =>
+    markdownParser.utils.escapeHtml(`[Image: ${tokens[index].content || 'image'}]`);
+  return markdownParser;
+}
+function renderMarkdown(container, source) {
+  container.replaceChildren();
+  if (!source) { container.append(node('p','muted','No description provided.')); return; }
+  try {
+    const parser = getMarkdownParser();
+    if (!parser) throw new Error('Markdown libraries unavailable. Showing the original text. Reload to restore the formatted preview.');
+    if (utf8Bytes(source) > MAX_MARKDOWN_BYTES) throw new Error('Preview paused: Markdown exceeds 100 KiB. Shorten the draft before publishing; no text has been removed.');
+    // The only HTML parsing path is DOMPurify's sanitized fragment. Raw HTML in
+    // Markdown is disabled; the final pass also sanitizes generated KaTeX markup.
+    const fragment = window.DOMPurify.sanitize(parser.render(source.replace(/^\uFEFF/,'')), {
+      RETURN_DOM_FRAGMENT:true, USE_PROFILES:{html:true,mathMl:true,svg:true},
+      FORBID_TAGS:['style','form','input','button','textarea','select','img','video','audio','source','iframe','object','embed'],
+      FORBID_ATTR:['id','name'], ALLOW_DATA_ATTR:false
+    });
+    for (const link of fragment.querySelectorAll('a')) {
+      const url = safeURL(link.getAttribute('href'));
+      if (!url) link.replaceWith(...link.childNodes);
+      else { link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; }
+    }
+    container.append(fragment);
+  } catch (error) {
+    container.append(node('p','markdown-notice',error.message || 'Preview unavailable. Showing original text.'),node('div','markdown-source',source));
+  }
+}
+function suggestedMarkdownTitle(source, filename) {
+  const parser = getMarkdownParser();
+  if (!parser) throw new Error('Markdown libraries have not loaded. Reload the page before importing a file, or enter your idea manually.');
+  const tokens = parser.parse(source.replace(/^\uFEFF/,''),{});
+  const heading = tokens.findIndex(token => token.type === 'heading_open' && token.tag === 'h1');
+  // Token parsing ignores H1-looking lines in fenced/indented code and supports
+  // both ATX (# Title) and Setext (Title / =====) Markdown headings.
+  const plainText = children => (children || []).map(token => token.children ? plainText(token.children) :
+    ['softbreak','hardbreak'].includes(token.type) ? ' ' : token.content || '').join('');
+  const title = (heading >= 0 ? plainText(tokens[heading + 1]?.children).trim() : '') || filename.replace(/\.md$/i,'');
+  return {title:Array.from(title).slice(0,200).join(''),shortened:Array.from(title).length > 200};
+}
+async function readMarkdownFile(file) {
+  if (!file || !/\.md$/i.test(file.name)) throw new Error('Choose one Markdown file with a .md extension.');
+  const mime = (file.type || '').toLowerCase().split(';')[0];
+  if (!['','text/markdown','text/x-markdown','text/plain','application/octet-stream'].includes(mime)) {
+    throw new Error('This file type is not supported. Save the document as a UTF-8 .md text file.');
+  }
+  if (file.size > MAX_MARKDOWN_BYTES) throw new Error('This file exceeds 100 KiB. Shorten it before importing. Your existing draft has not changed.');
+  const bytes = await new Promise((resolve,reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('The file could not be read. Your existing draft has not changed.'));
+    reader.onabort = () => reject(new Error('File import was canceled.'));
+    reader.readAsArrayBuffer(file);
+  });
+  let source;
+  try { source = new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes); }
+  catch { throw new Error('The file is not valid UTF-8. Save it as UTF-8 Markdown and try again.'); }
+  if (source.includes('\0')) throw new Error('This file contains a null character and cannot be stored as PostgreSQL text.');
+  if (utf8Bytes(source) > MAX_MARKDOWN_BYTES) throw new Error('Markdown must be at most 100 KiB of UTF-8 text.');
+  return {source,...suggestedMarkdownTitle(source,file.name)};
+}
+function experimentLink(value) {
+  const url = safeURL(value);
+  if (!url) return node('span','muted','Experiment link unavailable');
+  const link = node('a', '', 'Open experiment ↗');
+  link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+  return link;
+}
+function showNotification(message, error = false) {
+  const item = node('div', `notification${error ? ' error' : ''}`);
+  item.append(node('span','',message), button('×','',() => item.remove()));
+  item.lastChild.setAttribute('aria-label','Dismiss notification');
+  $('notifications').append(item);
+  while ($('notifications').children.length > 4) $('notifications').firstChild.remove();
+  setTimeout(() => item.remove(), error ? 15000 : 7000);
+}
+function friendlyError(error) {
+  const message = error?.message || '';
+  if (message.includes('ideas_description_check')) return 'The Markdown exceeds the database description limit. Use at most 100 KiB of UTF-8 text. If it is within that limit, ask the administrator to apply the updated schema.sql; the old limit was 20,000 characters. Your draft has been kept.';
+  if (message.includes('already claimed')) return 'This idea was already claimed or is no longer available. The latest state has been requested.';
+  if (message.includes('Idea changed')) return 'This idea changed while you were working. Close this dialog, review the latest state, and try again.';
+  if (message.includes('Idea not found')) return 'This idea no longer exists. The latest list has been requested.';
+  if (error?.code === '42501' || message.includes('Permission denied')) return 'You do not have permission to perform this action. Ask your lab administrator to check your profile and database grants.';
+  if (message.includes('Invalid status transition')) return 'This action is not available for the current idea status. Refresh and try again.';
+  if (message.includes('Invalid completion result')) return 'Choose Success or Fail before submitting.';
+  if (error?.code === '23514' || error?.code === '23502' || error?.code === '22007') return 'Check the form: a title, Monday week date, valid priority, and HTTP(S) experiment link are required where applicable.';
+  if (message.includes('Invalid login credentials')) return 'The email or password is incorrect.';
+  if (message.includes('Email not confirmed')) return 'Your account email is not confirmed. Contact your lab administrator.';
+  if (error?.status === 429) return 'Too many requests. Wait a moment and try again.';
+  if (error?.code?.startsWith('PGRST') || error?.code === '42P01') return 'Database setup is incomplete or unavailable. Ask the administrator to run supabase/schema.sql and check the Data API settings.';
+  if (error?.status === 401 || message.toLowerCase().includes('jwt expired')) return 'Your session has expired. Log out and sign in again.';
+  return 'Unable to reach the service. Check your connection and refresh. If you submitted a change, verify its current state before retrying.';
+}
+// Bound HTTP requests so an interrupted connection cannot leave controls locked.
+async function boundedFetch(input, options = {}) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (options.signal?.aborted) abort();
+  options.signal?.addEventListener('abort', abort, {once:true});
+  const timeout = setTimeout(abort, 15000);
+  try { return await fetch(input, {...options, signal:controller.signal}); }
+  finally { clearTimeout(timeout); options.signal?.removeEventListener('abort', abort); }
+}
+function initializeSupabase() {
+  if (!window.supabase) throw new Error('SDK unavailable');
+  return window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    auth:{persistSession:true, autoRefreshToken:true, detectSessionInUrl:false},
+    global:{fetch:boundedFetch}, realtime:{params:{eventsPerSecond:5}}
+  });
+}
+function updateConnection() {
+  let label = 'Signed out', kind = 'idle';
+  if (!navigator.onLine) { label = 'Offline'; kind = 'offline'; }
+  else if (state.profile) {
+    const connected = state.live && !state.stale;
+    label = connected ? 'Connected' : 'Reconnecting…'; kind = connected ? 'connected' : 'reconnecting';
+  } else if (state.userId) label = 'Checking access';
+  $('connection').textContent = label; $('connection').dataset.state = kind;
+  const unavailable = !navigator.onLine || state.stale;
+  $('sync-banner').hidden = !state.profile || (state.live && !unavailable);
+  $('sync-banner').textContent = !navigator.onLine ? 'You are offline. Displayed data may be out of date. Changes are paused until you reconnect.' :
+    state.stale ? 'Could not refresh the latest data. Displayed data may be out of date. Retrying automatically; you can also select Refresh.' :
+    'Live connection is reconnecting. The dashboard also checks for updates every 30 seconds.';
+  document.querySelectorAll('[data-mutation]').forEach(b => { b.disabled = state.pending || unavailable || !state.loaded || !!b.closest('[data-importing="true"]'); });
+}
+function stopRealtime() {
+  clearTimeout(state.retryTimer); clearTimeout(state.refreshTimer); clearInterval(state.pollTimer);
+  state.retryTimer = null; state.pollTimer = null; state.live = false;
+  const channel = state.channel; state.channel = null;
+  if (channel) void state.client.removeChannel(channel).catch(() => {});
+}
+function clearWorkspace() {
+  state.epoch++; stopRealtime(); state.profile = null; state.profiles = []; state.ideas = [];
+  state.loaded = false; state.stale = false; state.refreshTask = null; state.refreshAgain = false;
+  state.history = null; state.historyVersion++; state.weekOpen.clear(); state.ideaOpen.clear();
+  $('ideas').replaceChildren(); $('stats').replaceChildren(); $('modal-body').replaceChildren();
+  $('notifications').replaceChildren(); $('modal').close(); $('dashboard').hidden = true;
+  // Also discard filter options that contained names/weeks from a previous account.
+  $('week-filter').replaceChildren(new Option('All weeks',''));
+  $('member-filter').replaceChildren(new Option('All members',''), new Option('Unassigned','unassigned'));
+  updateConnection();
+}
+async function loadCurrentUser(session) {
+  const nextId = session?.user?.id || null;
+  if (nextId && nextId === state.userId && state.profile) {
+    if (session.access_token) void state.client.realtime.setAuth(session.access_token).catch(() => {});
+    return;
+  }
+  clearWorkspace(); state.userId = nextId;
+  const epoch = state.epoch;
+  $('login-view').hidden = !!nextId; $('access-view').hidden = !nextId;
+  $('login-submit').disabled = false; $('login-submit').textContent = 'Sign in';
+  if (!nextId) { updateConnection(); return; }
+  $('access-title').textContent = 'Checking membership…'; $('access-message').textContent = 'Loading your lab profile.';
+  $('retry-access').disabled = true;
+  updateConnection();
+  try {
+    const {data, error} = await state.client.from('profiles').select('id,display_name,role,active').eq('id',nextId).maybeSingle();
+    if (epoch !== state.epoch) return;
+    if (error) throw error;
+    if (!data?.active) {
+      $('access-title').textContent = 'Access has not been granted';
+      $('access-message').textContent = 'Your account is signed in, but it is not an active member of this workspace. Ask your lab administrator to associate your Auth user ID with an authorized profile.';
+      return;
+    }
+    state.profile = data;
+    $('access-view').hidden = true; $('dashboard').hidden = false;
+    $('identity').textContent = `Logged in as ${data.display_name}`;
+    $('avatar').textContent = data.display_name.slice(0,1);
+    $('role-label').textContent = data.role === 'pi' ? 'Principal Investigator' : 'Researcher';
+    $('create-button').hidden = !isPI();
+    renderDashboard();
+    subscribeToRealtime();
+    state.pollTimer = setInterval(() => { if (navigator.onLine && !document.hidden) void loadIdeas(); },30000);
+    await loadIdeas();
+  } catch (error) {
+    if (epoch !== state.epoch) return;
+    $('access-title').textContent = 'Unable to load workspace'; $('access-message').textContent = friendlyError(error);
+  } finally { if (epoch === state.epoch) $('retry-access').disabled = false; }
+}
+async function logout() {
+  const controls = [$('logout'), $('access-logout')]; controls.forEach(b => b.disabled = true);
+  try {
+    const {error} = await state.client.auth.signOut({scope:'local'});
+    if (error) throw error;
+    await loadCurrentUser(null); $('password').value = ''; $('email').value = '';
+  } catch (error) { showNotification(friendlyError(error),true); }
+  finally { controls.forEach(b => b.disabled = false); }
+}
+async function fetchAllIdeas() {
+  const records = [], size = 500;
+  for (let start = 0; ; start += size) {
+    const {data,error} = await state.client.from('ideas').select('*').order('idea_number',{ascending:true}).range(start,start+size-1);
+    if (error) throw error;
+    records.push(...data);
+    if (data.length < size) return [...new Map(records.map(row => [row.id,row])).values()];
+  }
+}
+// Coalesce event bursts and serialize refreshes. A response from a previous Auth
+// session never renders; an event during a request guarantees another fetch.
+function loadIdeas() {
+  if (!state.profile) return Promise.resolve();
+  if (state.refreshTask) { state.refreshAgain = true; return state.refreshTask; }
+  const epoch = state.epoch;
+  const task = (async () => {
+    do {
+      state.refreshAgain = false;
+      $('refresh').disabled = true; $('ideas').setAttribute('aria-busy','true');
+      try {
+        const [ideas, profilesResult] = await Promise.all([
+          fetchAllIdeas(), state.client.from('profiles').select('id,display_name,role,active').order('display_name')
+        ]);
+        if (epoch !== state.epoch) return;
+        if (profilesResult.error) throw profilesResult.error;
+        const profile = profilesResult.data.find(p => p.id === state.userId && p.active);
+        if (!profile) {
+          const userId = state.userId;
+          clearWorkspace(); state.userId = userId;
+          $('access-view').hidden = false; $('access-title').textContent = 'Workspace access removed';
+          $('access-message').textContent = 'Your account is no longer an active lab member. Contact the lab administrator.';
+          return;
+        }
+        state.profile = profile; state.ideas = ideas; state.profiles = profilesResult.data;
+        state.loaded = true; state.stale = false;
+        $('create-button').hidden = !isPI();
+        $('last-synced').textContent = `Synced ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})}`;
+        renderDashboard();
+        if (state.history && $('modal').open) void loadHistory(true);
+      } catch (error) {
+        if (epoch !== state.epoch) return;
+        state.stale = true;
+        $('last-synced').textContent = 'Refresh failed · data may be stale';
+        if (!state.loaded) renderDashboard();
+        // Keep a persistent, actionable message instead of toasts every 30s.
+        $('ideas').setAttribute('aria-label', friendlyError(error));
+      } finally {
+        if (epoch === state.epoch) {
+          $('refresh').disabled = false; $('ideas').setAttribute('aria-busy','false'); updateConnection();
+        }
+      }
+    } while (state.refreshAgain && epoch === state.epoch && navigator.onLine);
+  })();
+  state.refreshTask = task;
+  void task.finally(() => { if (state.refreshTask === task) state.refreshTask = null; });
+  return task;
+}
+function handleRealtimeUpdate() {
+  clearTimeout(state.refreshTimer);
+  state.refreshTimer = setTimeout(() => void loadIdeas(),180);
+}
+function subscribeToRealtime() {
+  if (!state.profile || !navigator.onLine) return;
+  clearTimeout(state.retryTimer); state.retryTimer = null;
+  const previous = state.channel;
+  state.channel = null;
+  if (previous) void state.client.removeChannel(previous).catch(() => {});
+  const epoch = state.epoch;
+  const channel = state.client.channel(`lab-workspace-${epoch}-${Date.now()}`);
+  state.channel = channel;
+  for (const table of ['ideas','idea_events','profiles']) {
+    channel.on('postgres_changes', {event:'*',schema:'public',table},handleRealtimeUpdate);
+  }
+  channel.subscribe(status => {
+    if (epoch !== state.epoch || channel !== state.channel) return;
+    if (status === 'SUBSCRIBED') {
+      state.live = true; state.retryDelay = 2000; clearTimeout(state.retryTimer); state.retryTimer = null;
+      void loadIdeas(); // closes the initial fetch/subscribe gap and catches missed events
+    } else if (['CHANNEL_ERROR','TIMED_OUT','CLOSED'].includes(status)) {
+      state.live = false;
+      if (!state.retryTimer && navigator.onLine) {
+        state.retryTimer = setTimeout(subscribeToRealtime,state.retryDelay);
+        state.retryDelay = Math.min(state.retryDelay * 2,30000);
+      }
+    }
+    updateConnection();
+  });
+  updateConnection();
+}
+function preserveSelect(id, options) {
+  const selected = $(id).value;
+  $(id).replaceChildren(...options.map(([value,label]) => new Option(label,value)));
+  if ([...$(id).options].some(option => option.value === selected)) $(id).value = selected;
+}
+function filteredIdeas() {
+  const query = $('search').value.trim().toLowerCase();
+  return state.ideas.filter(idea => {
+    const searchable = `${ideaNumber(idea.idea_number)} ${idea.idea_number} ${idea.title} ${idea.description || ''}`.toLowerCase();
+    return (!query || searchable.includes(query)) &&
+      (!$('week-filter').value || idea.week_start === $('week-filter').value) &&
+      (!$('status-filter').value || idea.status === $('status-filter').value) &&
+      (!$('member-filter').value || ($('member-filter').value === 'unassigned' ? !idea.assigned_to : idea.assigned_to === $('member-filter').value)) &&
+      (!$('result-filter').value || ($('result-filter').value === 'none' ? !idea.result : idea.result === $('result-filter').value)) &&
+      (!$('priority-filter').value || idea.priority === $('priority-filter').value);
+  }).sort((a,b) => $('sort').value === 'number' ? Number(a.idea_number)-Number(b.idea_number) :
+    ($('sort').value === 'oldest' ? 1 : -1) * (a.created_at.localeCompare(b.created_at) || Number(a.idea_number)-Number(b.idea_number)));
+}
+function renderDashboard() {
+  const counts = {total:state.ideas.length,available:0,testing:0,completed:0,success:0,fail:0};
+  state.ideas.forEach(idea => { counts[idea.status]++; if (idea.result) counts[idea.result]++; });
+  $('stats').replaceChildren(...Object.entries(counts).map(([kind,count]) => {
+    const item = node('div','stat'); item.dataset.kind = kind;
+    item.append(node('div','stat-label',kind === 'total' ? 'Total ideas' : titleCase(kind)),node('div','stat-value',state.loaded ? String(count) : '—'));
+    return item;
+  }));
+  const percent = counts.total ? Math.round(counts.completed / counts.total * 100) : 0;
+  $('progress-text').textContent = state.loaded ? `${counts.completed} / ${counts.total} completed` : 'Loading progress…';
+  $('progress-percent').textContent = state.loaded ? `${percent}%` : '—';
+  $('progress-fill').style.width = `${percent}%`; $('progress').setAttribute('aria-valuenow',String(percent));
+  preserveSelect('week-filter', [['','All weeks'],...[...new Set(state.ideas.map(i => i.week_start))].sort().reverse().map(w => [w,`Week of ${dateText(w)}`])]);
+  preserveSelect('member-filter', [['','All members'],['unassigned','Unassigned'],...state.profiles.map(p => [p.id,p.display_name])]);
+  renderIdeas(); updateConnection();
+}
+function renderIdeas() {
+  const focus = document.activeElement?.dataset?.focusKey;
+  const visible = filteredIdeas();
+  $('visible-count').textContent = state.loaded ? `${visible.length} of ${state.ideas.length}` : '';
+  const container = $('ideas'); container.replaceChildren();
+  if (!state.loaded || !visible.length) {
+    const empty = node('div','empty');
+    empty.append(node('h3','',!state.loaded ? (state.stale ? 'Unable to load research ideas' : 'Loading research ideas…') : state.ideas.length ? 'No ideas match the selected filters.' : 'A new week starts with an idea.'),
+      node('p','',!state.loaded ? (state.stale ? 'Check your connection and database setup, then select Refresh.' : 'Fetching the shared workspace.') : state.ideas.length ? 'Try a different search or clear your filters.' : isPI() ? 'Publish your first idea to start the lab’s next experiment.' : 'Ideas published by Shibo will appear here.'));
+    container.append(empty); return;
+  }
+  // Group order follows the selected record sort; grouping never hides results.
+  const groups = new Map();
+  visible.forEach(idea => { if (!groups.has(idea.week_start)) groups.set(idea.week_start,[]); groups.get(idea.week_start).push(idea); });
+  for (const [week,ideas] of groups) {
+    const details = node('details','week'); details.open = state.weekOpen.get(week) ?? true;
+    details.addEventListener('toggle',() => { if (details.isConnected) state.weekOpen.set(week,details.open); });
+    const summary = node('summary'); summary.dataset.focusKey = `week-${week}`;
+    const title = node('span','week-title'); title.append(node('span','chevron','▾'),node('span','week-name',`Week of ${dateText(week)}`));
+    summary.append(title,node('span','week-meta',`${ideas.length} ${ideas.length === 1 ? 'idea' : 'ideas'} · ${ideas.filter(i => i.status === 'completed').length} completed`));
+    const list = node('div','week-ideas'); ideas.forEach(idea => list.append(renderIdeaCard(idea)));
+    details.append(summary,list); container.append(details);
+  }
+  if (focus) [...container.querySelectorAll('[data-focus-key]')].find(el => el.dataset.focusKey === focus)?.focus({preventScroll:true});
+  updateConnection();
+}
+function renderIdeaCard(idea) {
+  const details = node('details','idea'); details.open = state.ideaOpen.get(idea.id) ?? false;
+  details.addEventListener('toggle',() => { if (details.isConnected) state.ideaOpen.set(idea.id,details.open); });
+  const summary = node('summary'); summary.dataset.focusKey = idea.id;
+  const badges = node('span','summary-badges'); badges.append(badge(idea.status)); if (idea.result) badges.append(badge(idea.result));
+  summary.append(node('span','chevron','▾'),node('span','idea-number mono',ideaNumber(idea.idea_number)),node('span','idea-title',idea.title),node('span','summary-assignee',memberName(idea.assigned_to)),badges);
+  const body = node('div','idea-body'), description = node('div','description markdown-body');
+  description.textContent = idea.description || 'No description provided.';
+  let rendered = false;
+  const renderDescription = () => {
+    if (details.open && !rendered) { renderMarkdown(description,idea.description); rendered = true; }
+  };
+  details.addEventListener('toggle',renderDescription); renderDescription(); body.append(description);
+  const metadata = node('dl','metadata');
+  for (const [label,value] of [['Priority',titleCase(idea.priority)],['Assigned to',memberName(idea.assigned_to)],['Status',titleCase(idea.status)],['Result',titleCase(idea.result)],['Updated',dateText(idea.updated_at,true)]]) {
+    const pair = node('div'); pair.append(node('dt','',label), label === 'Priority' ? node('dd') : node('dd','',value));
+    if (label === 'Priority') pair.lastChild.append(badge(idea.priority));
+    metadata.append(pair);
+  }
+  body.append(metadata);
+  if (idea.status === 'completed') {
+    const result = node('div','result-block'); result.append(node('h3','',`Testing ${titleCase(idea.result)} · ${dateText(idea.completed_at,true)}`),node('p','notes',idea.notes || 'No testing notes provided.'));
+    if (idea.experiment_url) result.append(experimentLink(idea.experiment_url));
+    body.append(result);
+  }
+  const actions = node('div','idea-actions'), workflow = node('div','actions'), management = node('div','actions');
+  if (idea.status === 'available') workflow.append(button('Claim idea','primary',() => claimIdea(idea),true));
+  if (idea.status === 'testing' && (idea.assigned_to === state.userId || isPI())) {
+    workflow.append(button('Complete','primary',() => openCompleteDialog(idea),true),button('Release','quiet',() => confirmAction('release',idea),true));
+  }
+  if (idea.status === 'completed' && isPI()) workflow.append(button('Reopen idea','quiet',() => confirmAction('reopen',idea),true));
+  workflow.append(button('History','quiet',() => openHistory(idea)));
+  if (isPI()) management.append(button('Edit','quiet',() => openIdeaDialog(idea),true),button('Delete','quiet danger',() => confirmAction('delete',idea),true));
+  [...workflow.children,...management.children].forEach(b => { b.dataset.focusKey = `${idea.id}-${b.textContent}`; });
+  actions.append(workflow,management); body.append(actions); details.append(summary,body); return details;
+}
+function openModal(title) {
+  state.history = null; state.historyVersion++;
+  state.modalOpener = document.activeElement;
+  $('modal-title').textContent = title; $('modal-body').replaceChildren();
+  $('modal').classList.remove('markdown-editor-dialog');
+  if (!$('modal').open) $('modal').showModal();
+  return $('modal-body');
+}
+function closeModal() {
+  if (state.pending) return;
+  state.history = null; state.historyVersion++;
+  $('modal').close(); $('modal-body').replaceChildren();
+  const opener = state.modalOpener;
+  if (opener?.isConnected) opener.focus();
+  else if (opener?.dataset.focusKey) [...document.querySelectorAll('[data-focus-key]')].find(el => el.dataset.focusKey === opener.dataset.focusKey)?.focus();
+}
+function formField(label, type, value = '', options = {}) {
+  const wrapper = node('label','field',label);
+  const input = document.createElement(type === 'textarea' ? 'textarea' : type === 'select' ? 'select' : 'input');
+  if (type !== 'textarea' && type !== 'select') input.type = type;
+  if (options.choices) options.choices.forEach(([value,text]) => input.append(new Option(text,value)));
+  input.value = value || '';
+  if (options.required) input.required = true;
+  if (options.maxLength) input.maxLength = options.maxLength;
+  wrapper.append(input);
+  if (options.hint) wrapper.append(node('small','',options.hint));
+  return {wrapper,input};
+}
+function formFooter(form,label) {
+  const error = node('p','error-text'); error.setAttribute('role','alert');
+  const actions = node('div','dialog-actions'), cancel = button('Cancel','quiet',closeModal), submit = node('button','primary',label);
+  submit.type = 'submit'; submit.dataset.mutation = ''; cancel.dataset.cancel = '';
+  actions.append(cancel,submit); form.append(error,actions); return error;
+}
+function openIdeaDialog(idea = null) {
+  const body = openModal(idea ? `Edit ${ideaNumber(idea.idea_number)}` : 'Publish research idea');
+  $('modal').classList.add('markdown-editor-dialog');
+  const form = node('form','markdown-editor');
+  const title = formField('Title','text',idea?.title,{required:true,maxLength:200});
+  const description = formField('Description (Markdown)','textarea',idea?.description,
+    {hint:'Headings, lists, tables, code, links, $inline math$ and $$display math$$. Maximum 100 KiB of UTF-8 text.'});
+  // Native textareas normalize CRLF on assignment. Keep the exact original
+  // string until an actual input event, including BOM, whitespace and line ends.
+  let markdownSource = idea?.description || '', importing = false, previewTimer;
+  const importBox = node('div','markdown-import'), importField = formField('Import one .md file (optional)','file');
+  importField.input.accept = '.md,text/markdown,text/plain';
+  const importStatus = node('p','small','One file = one idea. Import replaces the draft after confirmation; it does not publish anything.');
+  importStatus.setAttribute('role','status'); importBox.append(importField.wrapper,importStatus);
+  const size = node('p','markdown-size'); size.setAttribute('aria-live','polite');
+  const previewLabel = node('div','markdown-preview-label','Live preview');
+  const preview = node('div','markdown-preview markdown-body'); preview.setAttribute('aria-label','Markdown live preview');
+  const updatePreview = () => {
+    if (!form.isConnected) return;
+    const bytes = utf8Bytes(markdownSource);
+    size.textContent = `${bytes.toLocaleString()} / ${MAX_MARKDOWN_BYTES.toLocaleString()} UTF-8 bytes`;
+    description.input.setCustomValidity(bytes > MAX_MARKDOWN_BYTES ? 'Markdown exceeds 100 KiB. Shorten the draft; no text has been removed.' :
+      markdownSource.includes('\0') ? 'Remove null characters before publishing.' : '');
+    renderMarkdown(preview,markdownSource);
+  };
+  description.input.addEventListener('input',() => {
+    markdownSource = description.input.value;
+    clearTimeout(previewTimer); previewTimer = setTimeout(updatePreview,180);
+  });
+  const week = formField('Week starting','date',idea?.week_start || currentMonday(),{required:true,hint:'Choose a Monday.'});
+  const priority = formField('Priority','select',idea?.priority || 'medium',{choices:[['low','Low'],['medium','Medium'],['high','High']]});
+  const row = node('div','form-row'); row.append(week.wrapper,priority.wrapper);
+  const workspace = node('div','markdown-workspace'), sourceColumn = node('div'), previewColumn = node('div');
+  sourceColumn.append(description.wrapper,size); previewColumn.append(previewLabel,preview); workspace.append(sourceColumn,previewColumn);
+  form.append(importBox,title.wrapper,workspace,row);
+  const error = formFooter(form,idea ? 'Save changes' : 'Publish idea'); body.append(form);
+  importField.input.addEventListener('change',async () => {
+    const files = [...importField.input.files];
+    if (!files.length) return;
+    if (files.length !== 1) { error.textContent = 'Import exactly one .md file; bulk import is not supported.'; importField.input.value = ''; return; }
+    if ((markdownSource || title.input.value) && !window.confirm('Replace the current title and Markdown draft with this file? Nothing will be published until you confirm the form.')) {
+      importField.input.value = ''; return;
+    }
+    const epoch = state.epoch;
+    importing = true; form.dataset.importing = 'true'; error.textContent = '';
+    importStatus.textContent = 'Reading Markdown…';
+    const inputs = [...form.querySelectorAll('input,textarea,select')]; inputs.forEach(input => input.disabled = true);
+    updateConnection();
+    try {
+      const imported = await readMarkdownFile(files[0]);
+      if (!form.isConnected || epoch !== state.epoch) return;
+      markdownSource = imported.source; description.input.value = markdownSource; title.input.value = imported.title;
+      clearTimeout(previewTimer); updatePreview();
+      importStatus.textContent = `Imported ${files[0].name}. Review the title and preview, then ${idea ? 'Save changes' : 'Publish idea'}.` +
+        (imported.shortened ? ' The suggested title was shortened to 200 characters; the full Markdown is unchanged.' : '');
+    } catch (failure) {
+      if (form.isConnected && epoch === state.epoch) { error.textContent = failure.message; importStatus.textContent = 'Import failed. Your previous draft is unchanged.'; }
+    } finally {
+      importing = false; delete form.dataset.importing;
+      if (form.isConnected && epoch === state.epoch) { inputs.forEach(input => input.disabled = false); importField.input.value = ''; updateConnection(); }
+    }
+  });
+  form.addEventListener('submit',event => {
+    event.preventDefault(); error.textContent = '';
+    if (importing) return;
+    clearTimeout(previewTimer); updatePreview();
+    if (utf8Bytes(markdownSource) > MAX_MARKDOWN_BYTES || markdownSource.includes('\0')) {
+      error.textContent = description.input.validationMessage; description.input.focus(); return;
+    }
+    if (!title.input.value.trim()) { error.textContent = 'Enter an idea title.'; title.input.focus(); return; }
+    if (new Date(`${week.input.value}T12:00:00`).getDay() !== 1) { error.textContent = 'The week must start on a Monday.'; week.input.focus(); return; }
+    const args = {p_title:title.input.value.trim(),p_description:markdownSource,p_week_start:week.input.value,p_priority:priority.input.value};
+    void (idea ? updateIdea(idea,args,error) : createIdea(args,error));
+  });
+  updateConnection(); updatePreview(); title.input.focus();
+}
+function openCompleteDialog(idea) {
+  const body = openModal('Complete idea'); body.append(node('p','dialog-context',`${ideaNumber(idea.idea_number)} · ${idea.title}`));
+  const form = node('form'), fieldset = node('fieldset'); fieldset.append(node('legend','','Result (required)'));
+  const options = node('div','radio-options');
+  for (const value of ['success','fail']) {
+    const label = node('label','radio-option'), input = document.createElement('input');
+    input.type = 'radio'; input.name = 'result'; input.value = value; input.required = true;
+    label.append(input,node('span','',titleCase(value))); options.append(label);
+  }
+  fieldset.append(options);
+  const notes = formField('Testing notes (optional)','textarea','',{maxLength:20000});
+  const url = formField('Experiment URL (optional)','url','',{maxLength:2048,hint:'An http:// or https:// link to your experiment or repository.'});
+  form.append(fieldset,notes.wrapper,url.wrapper);
+  const error = formFooter(form,'Submit result'); body.append(form);
+  form.addEventListener('submit',event => {
+    event.preventDefault(); error.textContent = '';
+    if (url.input.value.trim() && !safeURL(url.input.value.trim())) { error.textContent = 'Use a valid HTTP(S) experiment URL.'; url.input.focus(); return; }
+    void completeIdea(idea,{p_result:new FormData(form).get('result'),p_notes:notes.input.value,p_experiment_url:url.input.value.trim()},error);
+  });
+  updateConnection(); options.querySelector('input').focus();
+}
+function confirmAction(action,idea) {
+  const body = openModal(`${titleCase(action)} ${ideaNumber(idea.idea_number)}?`), form = node('form');
+  const description = action === 'delete' ? 'This removes the idea from the dashboard. Its activity history and previous results will be retained.' :
+    action === 'reopen' ? 'This makes the idea available and clears its current assignment and result. Previous testing notes, links, and results remain in activity history.' :
+    'This makes the idea available for another member to claim and clears the current assignment.';
+  form.append(node('p','dialog-context',idea.title),node('p','',description));
+  const error = formFooter(form,`${titleCase(action)} idea`); body.append(form);
+  if (action === 'delete') form.querySelector('[type=submit]').className = 'danger';
+  form.addEventListener('submit',event => { event.preventDefault(); void ({delete:deleteIdea,release:releaseIdea,reopen:reopenIdea}[action])(idea,error); });
+  updateConnection(); form.querySelector('[data-cancel]').focus();
+}
+const versionArgs = idea => ({p_idea_id:idea.id,p_expected_revision:idea.revision});
+function createIdea(args,error) { return mutate('create_idea',args,'Research idea published.',error); }
+function updateIdea(idea,args,error) { return mutate('update_idea',{...versionArgs(idea),...args},'Idea updated.',error); }
+function deleteIdea(idea,error) { return mutate('delete_idea',versionArgs(idea),'Idea deleted. Activity history retained.',error); }
+function claimIdea(idea) { return mutate('claim_idea',{p_idea_id:idea.id},'Idea successfully claimed.'); }
+function releaseIdea(idea,error) { return mutate('release_idea',versionArgs(idea),'Idea released successfully.',error); }
+function completeIdea(idea,args,error) { return mutate('complete_idea',{...versionArgs(idea),...args},'Testing result submitted.',error); }
+function reopenIdea(idea,error) { return mutate('reopen_idea',versionArgs(idea),'Idea reopened. Previous results remain in history.',error); }
+async function mutate(name,args,success,errorElement) {
+  if (state.pending || !state.profile || state.stale || !navigator.onLine) return;
+  state.pending = true; const epoch = state.epoch;
+  const fields = [...$('modal-body').querySelectorAll('input,select,textarea,button')]; fields.forEach(el => el.disabled = true);
+  $('modal-close').disabled = true; updateConnection();
+  let succeeded = false;
+  try {
+    const {error} = await state.client.rpc(name,args);
+    if (epoch !== state.epoch) return;
+    if (error) throw error;
+    succeeded = true; showNotification(success);
+  } catch (error) {
+    if (epoch !== state.epoch) return;
+    const message = friendlyError(error);
+    if (errorElement?.isConnected) errorElement.textContent = message;
+    showNotification(message,true);
+  } finally {
+    state.pending = false; fields.forEach(el => el.disabled = false); $('modal-close').disabled = false;
+    if (epoch === state.epoch) {
+      if (succeeded && errorElement) closeModal();
+      // Always fetch authoritative state, including conflicts and uncertain HTTP failures.
+      await loadIdeas(); updateConnection();
+    }
+  }
+}
+function openHistory(idea = null) {
+  const body = openModal(idea ? `${ideaNumber(idea.idea_number)} · History` : 'Lab activity history');
+  body.append(node('p','dialog-context','A permanent record of changes and testing results, including deleted and reopened ideas.'));
+  const list = node('ol','history'), status = node('p','small'), more = button('Load more','quiet',() => void loadHistory(false));
+  body.append(status,list,more);
+  state.history = {ideaId:idea?.id || null,list,status,more,cursor:null};
+  void loadHistory(true);
+}
+async function loadHistory(reset) {
+  const history = state.history;
+  if (!history) return;
+  const version = ++state.historyVersion, epoch = state.epoch;
+  history.more.disabled = true; history.status.textContent = 'Loading history…';
+  try {
+    let query = state.client.from('idea_events').select('*').order('id',{ascending:false}).limit(50);
+    if (history.ideaId) query = query.eq('idea_id',history.ideaId);
+    if (!reset && history.cursor) query = query.lt('id',history.cursor);
+    const {data,error} = await query;
+    if (history !== state.history || version !== state.historyVersion || epoch !== state.epoch) return;
+    if (error) throw error;
+    if (reset) history.list.replaceChildren();
+    data.forEach(event => history.list.append(renderEvent(event)));
+    history.cursor = data.at(-1)?.id || history.cursor;
+    history.more.hidden = data.length < 50;
+    history.status.textContent = history.list.children.length ? 'Newest activity first · Times shown in your local timezone' : 'No activity yet.';
+  } catch (error) {
+    if (history === state.history && version === state.historyVersion && epoch === state.epoch) {
+      history.status.textContent = friendlyError(error); history.more.hidden = false;
+    }
+  } finally {
+    if (history === state.history && version === state.historyVersion) history.more.disabled = false;
+  }
+}
+function renderEvent(event) {
+  const item = node('li');
+  const verbs = {created:'created the idea',edited:'edited the idea',claimed:'claimed the idea',released:'released the idea',completed:'completed testing',reopened:'reopened the idea',deleted:'deleted the idea'};
+  item.append(node('strong','',`${ideaNumber(event.idea_number)} · ${event.actor_id ? memberName(event.actor_id) : 'Administrator'} ${verbs[event.event_type] || event.event_type}.`));
+  const time = node('time','',dateText(event.created_at,true)); time.dateTime = event.created_at; item.append(time);
+  const snapshot = event.new_state || event.previous_state;
+  if (snapshot) item.append(node('p','',snapshot.title));
+  // Reopening/deletion show the previous result prominently; full snapshots are
+  // always available as text so edited descriptions and earlier trials survive.
+  const result = event.event_type === 'reopened' || event.event_type === 'deleted' ? event.previous_state : event.new_state;
+  if (result?.result) {
+    item.append(badge(result.result),node('p','notes',`${memberName(result.assigned_to)} · ${dateText(result.completed_at,true)}\n${result.notes || 'No testing notes provided.'}`));
+    if (result.experiment_url) item.append(experimentLink(result.experiment_url));
+  }
+  const details = node('details','snapshot'); details.append(node('summary','','View recorded states'));
+  details.append(node('pre','',JSON.stringify({before:event.previous_state,after:event.new_state},null,2))); item.append(details);
+  return item;
+}
+function bindInterface() {
+  $('login-form').addEventListener('submit',async event => {
+    event.preventDefault(); $('login-error').textContent = ''; $('login-submit').disabled = true; $('login-submit').textContent = 'Signing in…';
+    try {
+      const {error} = await state.client.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});
+      if (error) throw error;
+      $('password').value = '';
+      // onAuthStateChange is the single source of session transitions.
+    } catch (error) { $('login-error').textContent = friendlyError(error); }
+    finally { $('login-submit').disabled = false; $('login-submit').textContent = 'Sign in'; }
+  });
+  $('logout').addEventListener('click',logout); $('access-logout').addEventListener('click',logout);
+  $('retry-access').addEventListener('click',async () => {
+    const {data,error} = await state.client.auth.getSession();
+    if (error) { showNotification(friendlyError(error),true); return; }
+    void loadCurrentUser(data.session);
+  });
+  $('create-button').addEventListener('click',() => openIdeaDialog());
+  $('activity-button').addEventListener('click',() => openHistory());
+  $('modal-close').addEventListener('click',closeModal);
+  $('modal').addEventListener('cancel',event => { event.preventDefault(); closeModal(); });
+  filterIds.forEach(id => $(id).addEventListener(id === 'search' ? 'input' : 'change',renderIdeas));
+  $('clear-filters').addEventListener('click',() => { filterIds.forEach(id => $(id).value = id === 'sort' ? 'newest' : ''); renderIdeas(); });
+  for (const [id,open] of [['expand-all',true],['collapse-all',false]]) $(id).addEventListener('click',() => {
+    state.ideas.forEach(idea => { state.weekOpen.set(idea.week_start,open); state.ideaOpen.set(idea.id,open); }); renderIdeas();
+  });
+  $('refresh').addEventListener('click',() => void loadIdeas());
+  window.addEventListener('offline',() => { state.live = false; updateConnection(); });
+  window.addEventListener('online',() => { subscribeToRealtime(); void loadIdeas(); updateConnection(); });
+  document.addEventListener('visibilitychange',() => { if (!document.hidden && state.profile) { if (!state.live) subscribeToRealtime(); void loadIdeas(); } });
+  window.addEventListener('focus',() => { if (state.profile && navigator.onLine) void loadIdeas(); });
+}
+async function initializeApp() {
+  bindInterface();
+  try {
+    state.client = initializeSupabase();
+    // Never await other SDK calls inside the Auth callback (its internal lock is
+    // still held). Defer work and guard subsequent responses with session epochs.
+    state.client.auth.onAuthStateChange((_event,session) => {
+      setTimeout(() => void loadCurrentUser(session),0);
+    });
+    // INITIAL_SESSION from the SDK handles persisted sessions as well as null.
+  } catch {
+    $('login-error').textContent = 'The sign-in library could not load. Check your connection, allow cdn.jsdelivr.net, and reload this page.';
+    $('login-submit').textContent = 'Sign-in unavailable'; $('login-submit').disabled = true;
+  }
+}
+window.addEventListener('DOMContentLoaded',initializeApp);
+</script>
+</body>
+</html>
