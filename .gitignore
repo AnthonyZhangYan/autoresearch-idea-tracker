@@ -13,3 +13,8 @@ test-results/
 playwright-report/
 .vscode/
 *.local.*
+
+# V1 backups contain research text and member identities: never commit them.
+*backup*.json
+*backup*.csv
+backups/

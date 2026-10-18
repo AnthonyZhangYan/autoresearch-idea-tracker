@@ -23,17 +23,29 @@ const script = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)].a
 new vm.Script(script);
 let checks = 1;
 function check(actual,expected,label) { assert.deepEqual(actual,expected,label); checks++; }
-const clone = value => JSON.parse(JSON.stringify(value));
+const clone = value => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 const profiles = ['Shibo','Yan','Junqi','Yifan'].map((name,index) => ({id:`member-${index}`,display_name:name,role:index ? 'researcher' : 'pi',active:true}));
-const base = {description:'Synthetic test data only. Evaluate the experiment and record its outcome.',week_start:'2026-10-12',priority:'high',status:'available',assigned_to:null,result:null,notes:null,experiment_url:null,completed_at:null,revision:1,created_at:'2026-10-12T14:00:00Z',updated_at:'2026-10-12T14:00:00Z'};
+const base = {description:'Synthetic test data only. Evaluate the experiment and record its outcome.',week_start:'2026-10-12',priority:'high',created_by:'member-0',revision:1,created_at:'2026-10-12T14:00:00Z',updated_at:'2026-10-12T14:00:00Z'};
 let ideas = [
   {...base,id:'idea-1',idea_number:1,title:'Evaluate tool selection instructions'},
-  {...base,id:'idea-2',idea_number:2,title:'Compare memory retrieval strategies',status:'testing',assigned_to:'member-1',priority:'medium'},
-  {...base,id:'idea-3',idea_number:3,title:'Measure search quality',status:'completed',assigned_to:'member-2',result:'fail',notes:'Synthetic failed trial — preserve this result.',completed_at:'2026-10-13T15:00:00Z',experiment_url:'https://example.org/experiment',priority:'low'},
-  {...base,id:'idea-4',idea_number:4,title:'Test retry budgets',status:'completed',assigned_to:'member-3',result:'success',completed_at:'2026-10-14T15:00:00Z',week_start:'2026-10-19'},
+  {...base,id:'idea-2',idea_number:2,title:'Compare memory retrieval strategies',priority:'medium',created_by:'member-1'},
+  {...base,id:'idea-3',idea_number:3,title:'Measure search quality',priority:'low'},
+  {...base,id:'idea-4',idea_number:4,title:'Test retry budgets',week_start:'2026-10-19'},
 ];
-let events = [], currentId = 'member-0', authCallback, channel, rpcError, readsFail = false, delayRead, calls = [], removed = 0;
+const participation = (idea_id,member_id,extra = {}) => ({idea_id,member_id,status:'testing',result:null,notes:null,experiment_url:null,
+  joined_at:'2026-10-12T15:00:00Z',completed_at:null,updated_at:'2026-10-12T15:00:00Z',revision:1,...extra});
+const completed = (result,notes = null,experiment_url = null) => ({status:'completed',result,notes,experiment_url,completed_at:'2026-10-13T15:00:00Z',revision:2});
+let participants = [
+  participation('idea-2','member-1'),
+  participation('idea-3','member-1',completed('success','Yan synthetic success')),
+  participation('idea-3','member-2',{...completed('fail','Synthetic failed trial — preserve this result.','https://example.org/experiment'),joined_at:'2026-10-12T16:00:00Z'}),
+  participation('idea-4','member-3',completed('success')),
+];
+let comments = [{id:'comment-1',idea_id:'idea-3',author_id:'member-2',body:'Initial **synthetic** note with $x^2$.',
+  client_request_id:'00000000-0000-4000-8000-000000000001',created_at:'2026-10-13T16:00:00Z',removed_at:null,removed_by:null}];
+let events = [], currentId = 'member-0', authCallback, channel, rpcError, loseNextResponse = false, readsFail = false, delayRead, calls = [], removed = 0, serial = 100;
 const session = () => currentId ? {user:{id:currentId},access_token:'synthetic-test-token'} : null;
+const rowsFor = table => ({profiles,ideas,idea_participants:participants,idea_comments:comments})[table] || [...events].reverse();
 function query(table) {
   const filters = []; let low=0, high=Infinity, limit=Infinity, single=false;
   const builder = {
@@ -44,12 +56,75 @@ function query(table) {
       try {
         if (delayRead && table==='ideas') { const delay=delayRead; delayRead=null; await delay; }
         if (readsFail) return resolve({data:null,error:{message:'Network unavailable'}});
-        let rows = clone(table==='profiles' ? profiles : table==='ideas' ? ideas : [...events].reverse());
+        let rows = clone(rowsFor(table));
         rows = rows.filter(row=>filters.every(filter=>filter(row))).slice(low,Math.min(high+1,low+limit));
         resolve({data:single ? rows[0] || null : rows,error:null});
       } catch(error) { reject(error); }
     }
   }; return builder;
+}
+// Mirrors the V2 RPC rules closely enough for UI tests; the database suite is authoritative.
+const ok = data => ({data:clone(data),error:null}), fail = message => ({data:null,error:{message}});
+const record = (idea,event_type,previous_state,new_state,member_id = null) => events.push({id:events.length+1,idea_id:idea.id,idea_number:idea.idea_number,
+  actor_id:currentId,member_id,event_type,previous_state:clone(previous_state) ?? null,new_state:clone(new_state) ?? null,created_at:'2026-10-16T14:00:00Z'});
+function perform(name,args) {
+  const idea = ideas.find(i=>i.id===args.p_idea_id);
+  const mine = idea && participants.find(p=>p.idea_id===idea.id && p.member_id===currentId);
+  if (name==='create_idea') {
+    const created = {...base,id:`idea-${serial++}`,idea_number:Math.max(0,...ideas.map(i=>i.idea_number),...events.map(e=>e.idea_number))+1,title:args.p_title,
+      description:args.p_description,week_start:args.p_week_start,priority:args.p_priority,created_by:currentId};
+    ideas.push(created); record(created,'created',null,created); return ok(created);
+  }
+  if (name==='remove_comment') {
+    const comment = comments.find(c=>c.id===args.p_comment_id && !c.removed_at);
+    if (!comment) return fail('Comment not found');
+    const before = clone(comment); Object.assign(comment,{removed_at:'2026-10-16T15:00:00Z',removed_by:currentId});
+    record(ideas.find(i=>i.id===comment.idea_id),'comment_removed',before,comment); return ok(comment);
+  }
+  if (!idea) return fail('Idea not found');
+  if (name==='update_idea') {
+    if (idea.revision!==args.p_expected_revision) return fail('Idea changed. Refresh and try again');
+    const before = clone(idea);
+    Object.assign(idea,{title:args.p_title,description:args.p_description,week_start:args.p_week_start,priority:args.p_priority,revision:idea.revision+1});
+    record(idea,'edited',before,idea); return ok(idea);
+  }
+  if (name==='delete_idea') {
+    const before = {...clone(idea),participants:clone(participants.filter(p=>p.idea_id===idea.id)),comments:clone(comments.filter(c=>c.idea_id===idea.id))};
+    ideas = ideas.filter(i=>i!==idea); participants = participants.filter(p=>p.idea_id!==idea.id); comments = comments.filter(c=>c.idea_id!==idea.id);
+    record(idea,'deleted',before,null); return {data:null,error:null};
+  }
+  if (name==='join_idea') {
+    if (mine && mine.status!=='withdrawn') return fail('Already participating in this idea');
+    const before = clone(mine);
+    const joined = mine ? Object.assign(mine,{status:'testing',revision:mine.revision+1}) : participation(idea.id,currentId,{joined_at:'2026-10-16T14:00:00Z'});
+    if (!mine) participants.push(joined);
+    record(idea,mine ? 'rejoined' : 'joined',before,joined,currentId); return ok(joined);
+  }
+  if (name==='leave_idea' || name==='submit_result') {
+    if (!mine) return fail('Participation not found');
+    if (mine.revision!==args.p_expected_revision) return fail('Participation changed. Refresh and try again');
+    if (mine.status!=='testing') return fail('Invalid status transition');
+    const before = clone(mine);
+    Object.assign(mine,name==='leave_idea' ? {status:'withdrawn'} : {status:'completed',result:args.p_result,notes:args.p_notes || null,
+      experiment_url:args.p_experiment_url || null,completed_at:'2026-10-16T14:00:00Z'},{revision:mine.revision+1});
+    record(idea,name==='leave_idea' ? 'withdrew' : 'result_submitted',before,mine,currentId); return ok(mine);
+  }
+  if (name==='reopen_result') {
+    const target = participants.find(p=>p.idea_id===idea.id && p.member_id===args.p_member_id);
+    if (!target) return fail('Participation not found');
+    if (target.revision!==args.p_expected_revision) return fail('Participation changed. Refresh and try again');
+    const before = clone(target);
+    Object.assign(target,{status:'testing',result:null,notes:null,experiment_url:null,completed_at:null,revision:target.revision+1});
+    record(idea,'result_reopened',before,target,target.member_id); return ok(target);
+  }
+  if (name==='add_comment') {
+    const existing = comments.find(c=>c.author_id===currentId && c.client_request_id===args.p_client_request_id);
+    if (existing) return ok(existing);
+    const comment = {id:`comment-${serial++}`,idea_id:idea.id,author_id:currentId,body:args.p_body,client_request_id:args.p_client_request_id,
+      created_at:'2026-10-16T14:30:00Z',removed_at:null,removed_by:null};
+    comments.push(comment); record(idea,'commented',null,comment); return ok(comment);
+  }
+  throw new Error(`Unexpected RPC ${name}`);
 }
 const client = {
   from:query,
@@ -65,16 +140,10 @@ const client = {
   async rpc(name,args){
     calls.push({name,args:clone(args)});
     if (rpcError) return {data:null,error:rpcError};
-    let idea=ideas.find(i=>i.id===args.p_idea_id);const before=idea && clone(idea);
-    if(name==='create_idea') {idea={...base,id:`idea-${ideas.length+1}`,idea_number:ideas.length+1,title:args.p_title,description:args.p_description,week_start:args.p_week_start,priority:args.p_priority};ideas.push(idea);}
-    if(name==='update_idea') Object.assign(idea,{title:args.p_title,description:args.p_description,week_start:args.p_week_start,priority:args.p_priority});
-    if(name==='claim_idea') Object.assign(idea,{status:'testing',assigned_to:currentId});
-    if(name==='complete_idea') Object.assign(idea,{status:'completed',result:args.p_result,notes:args.p_notes,experiment_url:args.p_experiment_url,completed_at:'2026-10-16T14:00:00Z'});
-    if(['release_idea','reopen_idea'].includes(name)) Object.assign(idea,{status:'available',assigned_to:null,result:null,notes:null,experiment_url:null,completed_at:null});
-    if(name==='delete_idea') ideas=ideas.filter(i=>i!==idea);
-    idea.revision++;
-    events.push({id:events.length+1,idea_id:idea.id,idea_number:idea.idea_number,actor_id:currentId,event_type:({create_idea:'created',update_idea:'edited',claim_idea:'claimed',complete_idea:'completed',release_idea:'released',reopen_idea:'reopened',delete_idea:'deleted'})[name],previous_state:before || null,new_state:name==='delete_idea'?null:clone(idea),created_at:'2026-10-16T14:00:00Z'});
-    return {data:clone(idea),error:null};
+    const result = perform(name,args);
+    // Simulates a committed request whose response never arrived.
+    if (loseNextResponse && !result.error) { loseNextResponse = false; return {data:null,error:{message:'Failed to fetch'}}; }
+    return result;
   }
 };
 const dom = new JSDOM(html,{url:'http://127.0.0.1:8765/autoresearch-idea-tracker/',runScripts:'outside-only',pretendToBeVisual:true});
@@ -83,12 +152,18 @@ installMarkdownLibraries(w);
 w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
 w.HTMLDialogElement.prototype.close=function(){this.open=false;};
 w.supabase={createClient:()=>client};
-w.eval(script+'\nwindow.__app = {state,loadIdeas,loadCurrentUser,renderDashboard,openIdeaDialog,openCompleteDialog,confirmAction,claimIdea,mutate,openHistory,safeURL,closeModal,filteredIdeas,renderMarkdown,suggestedMarkdownTitle,readMarkdownFile};');
+w.eval(script+'\nwindow.__app = {state,loadIdeas,loadCurrentUser,renderDashboard,openIdeaDialog,openResultDialog,confirmAction,joinIdea,mutate,openHistory,openDiscussion,safeURL,closeModal,filteredIdeas,renderMarkdown,suggestedMarkdownTitle,readMarkdownFile};');
 const app=w.__app;
 const wait=async condition=>{for(let n=0;n<200;n++){if(condition())return;await new Promise(resolve=>setTimeout(resolve,5));}throw Error('Timed out waiting for DOM test condition');};
 const click = id => d.getElementById(id).click();
 const submit = () => d.querySelector('#modal-body form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
 const text = id => d.getElementById(id).textContent;
+const card = number => [...d.querySelectorAll('.idea')].find(el=>el.querySelector('.idea-number').textContent===number);
+const labels = element => [...element.querySelectorAll('button')].map(b=>b.textContent);
+const press = (element,label) => [...element.querySelectorAll('button')].find(b=>b.textContent===label).click();
+const settled = () => wait(()=>!app.state.pending && !app.state.refreshTask);
+const ideaById = id => app.state.ideas.find(i=>i.id===id);
+const rowOf = (ideaId,memberId) => app.state.participants.find(p=>p.idea_id===ideaId && p.member_id===memberId);
 async function snapshot(name) {
   if (!process.env.TRACKER_PREVIEW_DIR) return;
   const copy=d.documentElement.cloneNode(true);
@@ -116,18 +191,22 @@ try {
   check(d.getElementById('dashboard').hidden,false,'authorized dashboard');
   check(text('identity'),'Logged in as Shibo','profile identity');
   check(text('connection'),'Connected','subscription status');
-  check(d.querySelectorAll('.stat-value').length,6,'six actual counters');
-  check([...d.querySelectorAll('.stat-value')].map(el=>el.textContent),['4','1','1','2','1','1'],'database-derived counts');
-  check(text('progress-percent'),'50%','completion progress');
+  check([...d.querySelectorAll('.stat-label')].map(el=>el.textContent),['Total ideas','Open','In progress','With results','Success results','Fail results'],'V2 counters');
+  check([...d.querySelectorAll('.stat-value')].map(el=>el.textContent),['4','1','1','2','2','1'],'counts derived from participants');
+  check(text('progress-percent'),'50%','share of ideas with results');
+  check(text('progress-text'),'2 / 4 ideas have results','progress label');
   check(d.querySelectorAll('.week').length,2,'weekly groups');
   check(channel.handlers.map(h=>h.filter.table),['ideas','idea_events','profiles'],'subscribed tables');
   check(channel.handlers.every(h=>h.filter.event==='*'),true,'all change types');
+  check(d.getElementById('create-button').hidden,false,'PI can publish');
   click('expand-all');
   check([...d.querySelectorAll('.idea,.week')].every(el=>el.open),true,'expand all');
   await snapshot('dashboard.html');
   click('collapse-all');check([...d.querySelectorAll('.idea,.week')].every(el=>!el.open),true,'collapse all');
   const setFilter=(id,value)=>{d.getElementById(id).value=value;d.getElementById(id).dispatchEvent(new w.Event(id==='search'?'input':'change'));};
-  for (const [id,value,expected] of [['search','IDEA-003',1],['search','retrieval',1],['search','synthetic',4],['status-filter','completed',2],['member-filter','member-1',1],['result-filter','fail',1],['priority-filter','high',2],['week-filter','2026-10-19',1],['member-filter','unassigned',1],['result-filter','none',2]]) {
+  for (const [id,value,expected] of [['search','IDEA-003',1],['search','retrieval',1],['search','synthetic',4],['status-filter','open',1],['status-filter','testing',1],
+    ['status-filter','results',2],['member-filter','member-1',2],['member-filter','none',1],['result-filter','fail',1],['result-filter','success',2],
+    ['result-filter','none',2],['priority-filter','high',2],['week-filter','2026-10-19',1]]) {
     click('clear-filters');setFilter(id,value);check(d.querySelectorAll('.idea').length,expected,`filter ${id}=${value}`);
   }
   click('clear-filters');setFilter('search','no-matching-idea');check(text('ideas').includes('No ideas match'),true,'empty search');click('clear-filters');
@@ -138,6 +217,23 @@ try {
   await app.loadIdeas();check(d.querySelectorAll('.idea-body img,.idea-body script').length,0,'untrusted content is text');
   check(text('ideas').includes('<img src=x'),true,'text not stripped or interpreted');
   ideas[0].description=base.description;
+
+  // ---- Independent participants on one idea.
+  await app.loadIdeas();
+  let c3 = card('IDEA-003');
+  check(c3.querySelector('.summary-assignee').textContent,'Yan, Junqi','participants summarized on the card');
+  check([...c3.querySelectorAll('.summary-badges .badge')].map(b=>b.textContent),['1 success','1 fail'],'aggregated badges');
+  check([...c3.querySelectorAll('.participant')].map(li=>[li.querySelector('.participant-name').textContent,[...li.querySelectorAll('.badge')].map(b=>b.textContent).join('/')]),
+    [['Yan','Completed/Success'],['Junqi','Completed/Fail']],'each participant shows their own status and result');
+  check(c3.textContent.includes('Synthetic failed trial'),true,'participant notes shown');
+  check(c3.querySelector('.participant a[href]').getAttribute('rel'),'noopener noreferrer','safe experiment link');
+  check(labels(c3).filter(l=>l==='Reopen result').length,2,'PI can reopen each result');
+  check(labels(c3).includes('Discussion (1)'),true,'comment count on card');
+  check([...card('IDEA-001').querySelectorAll('.summary-badges .badge')].map(b=>b.textContent),['Open'],'idea without participants is open');
+  check(card('IDEA-001').querySelector('.summary-assignee').textContent,'No participants','empty participant summary');
+  check(card('IDEA-002').textContent.includes('Published by'),true,'creator shown');
+
+  // ---- Publish and edit (creator or PI).
   app.openIdeaDialog();
   const form=d.querySelector('#modal-body form');
   form.querySelector('input[type=text]').value='Created through form';
@@ -148,33 +244,117 @@ try {
   await wait(()=>!app.state.pending && !d.getElementById('modal').open);
   check(calls.at(-1).name,'create_idea','publish RPC');
   check(app.state.ideas.length,5,'publish refetch');
-  let created=app.state.ideas.at(-1);
+  let created=app.state.ideas.find(i=>i.title==='Created through form');
   app.openIdeaDialog(created);d.querySelector('#modal-body input[type=text]').value='Revised test idea';submit();
   await wait(()=>!app.state.pending && !d.getElementById('modal').open);
   check(calls.at(-1).args.p_expected_revision,created.revision,'edit revision');
-  await app.claimIdea(app.state.ideas[0]);check(calls.at(-1).name,'claim_idea','claim RPC');
-  check(Object.keys(calls.at(-1).args),['p_idea_id'],'no arbitrary assignee');
-  let active=app.state.ideas[0];app.openCompleteDialog(active);
+
+  // ---- Join, then submit only my own result.
+  press(card('IDEA-001'),'Join idea');
+  await wait(()=>rowOf('idea-1','member-0'));await settled();
+  check(calls.at(-1),{name:'join_idea',args:{p_idea_id:'idea-1'}},'join RPC takes only the idea');
+  check(labels(card('IDEA-001')).includes('Join idea'),false,'join hidden once participating');
+  check(labels(card('IDEA-001')).includes('Submit my result'),true,'own testing row offers result submission');
+  press(card('IDEA-001'),'Submit my result');
+  check(text('modal-title'),'Submit my result','result dialog');
   d.querySelector('input[value=fail]').checked=true;
   d.querySelector('#modal-body textarea').value='Synthetic notes';
   d.querySelector('input[type=url]').value='javascript:alert(1)';submit();
-  check(d.querySelector('#modal-body .error-text').textContent.includes('HTTP(S)'),true,'completion URL validation');
+  check(d.querySelector('#modal-body .error-text').textContent.includes('HTTP(S)'),true,'result URL validation');
   d.querySelector('input[type=url]').value='https://example.org/trial';
-  await snapshot('completion.html');submit();
-  await wait(()=>!app.state.pending && !d.getElementById('modal').open);
-  check(calls.at(-1).args.p_result,'fail','completion result');
-  check(app.state.ideas[0].status,'completed','failed result remains completed');
-  app.confirmAction('reopen',app.state.ideas[0]);submit();await wait(()=>!app.state.pending && !d.getElementById('modal').open);
-  check(calls.at(-1).name,'reopen_idea','reopen RPC');
-  await app.claimIdea(app.state.ideas[0]);app.confirmAction('release',app.state.ideas[0]);submit();await wait(()=>!app.state.pending && !d.getElementById('modal').open);
-  check(calls.at(-1).name,'release_idea','release RPC');
-  app.confirmAction('delete',app.state.ideas.at(-1));submit();await wait(()=>!app.state.pending && !d.getElementById('modal').open);
+  await snapshot('result.html');submit();
+  await wait(()=>!app.state.pending && !d.getElementById('modal').open);await settled();
+  check(calls.at(-1).name,'submit_result','submit result RPC');
+  check(Object.keys(calls.at(-1).args),['p_idea_id','p_expected_revision','p_result','p_notes','p_experiment_url'],'no member argument: only the caller row can change');
+  check(calls.at(-1).args.p_result,'fail','submitted result');
+  check([...card('IDEA-003').querySelectorAll('.summary-badges .badge')].map(b=>b.textContent),['1 success','1 fail'],'other ideas and members unaffected');
+
+  // ---- A second member's view: own result only, no PI controls.
+  currentId='member-1';await app.loadCurrentUser(session());await settled();
+  check(text('identity'),'Logged in as Yan','researcher session');
+  check(d.getElementById('create-button').hidden,false,'researchers can publish');
+  check(labels(d.getElementById('ideas')).includes('Delete'),false,'researcher cannot delete');
+  check(labels(d.getElementById('ideas')).filter(l=>l==='Edit').length,app.state.ideas.filter(i=>i.created_by==='member-1').length,'edit only own ideas');
+  check(labels(d.getElementById('ideas')).includes('Reopen result'),false,'researcher cannot reopen results');
+  check(labels(card('IDEA-001')).includes('Submit my result'),false,'cannot submit into another member row');
+  check(labels(card('IDEA-002')).includes('Submit my result'),true,'own testing row actionable');
+  press(card('IDEA-002'),'Submit my result');d.querySelector('input[value=success]').checked=true;submit();
+  await wait(()=>!app.state.pending && !d.getElementById('modal').open);await settled();
+  check(calls.at(-1).args.p_idea_id,'idea-2','Yan submits on her own idea');
+  check([rowOf('idea-1','member-0').result,rowOf('idea-2','member-1').result],['fail','success'],'two members keep independent results');
+  currentId='member-0';await app.loadCurrentUser(session());await settled();
+
+  // ---- PI reopens exactly one member's result.
+  const yanRow=rowOf('idea-3','member-1');
+  app.confirmAction('reopen',ideaById('idea-3'),yanRow);
+  check(text('modal-title'),'Reopen Yan’s result?','reopen confirmation names the member');
+  submit();await wait(()=>!app.state.pending && !d.getElementById('modal').open);await settled();
+  check(calls.at(-1),{name:'reopen_result',args:{p_idea_id:'idea-3',p_member_id:'member-1',p_expected_revision:yanRow.revision}},'reopen targets one member row');
+  check([...card('IDEA-003').querySelectorAll('.summary-badges .badge')].map(b=>b.textContent),['1 testing','1 fail'],'Junqi result kept after Yan reopened');
+
+  // ---- Leave and rejoin.
+  press(card('IDEA-004'),'Join idea');await wait(()=>rowOf('idea-4','member-0'));await settled();
+  press(card('IDEA-004'),'Leave');check(text('modal-title'),'Leave IDEA-004?','leave confirmation');
+  submit();await wait(()=>!app.state.pending && !d.getElementById('modal').open);await settled();
+  check(calls.at(-1).name,'leave_idea','leave RPC');
+  check(Object.keys(calls.at(-1).args),['p_idea_id','p_expected_revision'],'leave affects only the caller');
+  check(labels(card('IDEA-004')).includes('Rejoin idea'),true,'withdrawn member can rejoin');
+  check(card('IDEA-004').querySelector('.summary-assignee').textContent,'Yifan','withdrawn member hidden from card');
+
+  // ---- Deletion keeps history.
+  created=ideaById(created.id);
+  app.confirmAction('delete',created);submit();await wait(()=>!app.state.pending && !d.getElementById('modal').open);await settled();
   check(calls.at(-1).name,'delete_idea','delete RPC');check(app.state.ideas.length,4,'delete refetch');
   app.openHistory();await wait(()=>d.querySelectorAll('.history li').length>0);
-  check(text('modal-body').includes('Synthetic notes'),true,'historical trial visible');
-  check(text('modal-body').includes('deleted the idea'),true,'deleted event accessible');app.closeModal();
-  rpcError={message:'Idea already claimed or no longer available'};
-  await app.claimIdea(app.state.ideas[0]);check(text('notifications').includes('already claimed'),true,'conflict notification');rpcError=null;
+  for (const phrase of ['submitted a result','Synthetic notes','reopened Yan’s result','Yan synthetic success','left the idea','joined the idea','deleted the idea','Preserved: 0 participants'])
+    check(text('modal-body').includes(phrase),true,`history shows: ${phrase}`);
+  app.closeModal();
+
+  // ---- Discussion: Markdown/LaTeX, validation, idempotent retry, removal.
+  app.openDiscussion(ideaById('idea-3'));
+  await wait(()=>d.querySelectorAll('.comment').length===1);
+  check(text('modal-title'),'IDEA-003 · Discussion','discussion dialog');
+  const first=d.querySelector('.comment');
+  check([first.querySelector('.comment-head strong').textContent,first.querySelector('.markdown-body strong')?.textContent,!!first.querySelector('.katex')],['Junqi','synthetic',true],'comment renders author, Markdown and math');
+  const composer=d.querySelector('.comment-composer textarea');
+  const type=value=>{composer.value=value;composer.dispatchEvent(new w.Event('input'));};
+  const callsBeforeComment=calls.length;
+  submit();check(d.querySelector('.comment-composer .error-text').textContent,'Write a comment before posting.','empty comment rejected');
+  type('x'.repeat(20481));submit();check(d.querySelector('.comment-composer .error-text').textContent.includes('20 KiB'),true,'oversized comment rejected');
+  check(calls.length,callsBeforeComment,'invalid comments make no RPC');
+  const commentText='## Proposal\n\n$$\\alpha_i$$ <img src=x onerror=alert(1)> [x](javascript:alert(1))';
+  type(commentText);
+  await wait(()=>d.querySelector('.comment-composer .markdown-preview h2'));
+  check(!!d.querySelector('.comment-composer .markdown-preview .katex'),true,'live comment preview renders math');
+  loseNextResponse=true;submit();await settled();
+  const firstAttempt=calls.at(-1).args;
+  check(composer.value,commentText,'draft kept after an uncertain failure');
+  check(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(firstAttempt.p_client_request_id),true,'request ID is a UUID');
+  submit();await settled();
+  check(calls.at(-1).args.p_client_request_id,firstAttempt.p_client_request_id,'retry reuses the request ID');
+  check(comments.filter(c=>c.body===commentText).length,1,'lost response plus retry posts once');
+  check([d.getElementById('modal').open,composer.value],[true,''],'dialog stays open and draft clears after posting');
+  await wait(()=>d.querySelectorAll('.comment').length===2);
+  const posted=[...d.querySelectorAll('.comment')].at(-1);
+  check([!!posted.querySelector('h2'),!!posted.querySelector('.katex')],[true,true],'posted comment rendered');
+  check(posted.querySelector('img,script,[onerror],a[href^="javascript"]'),null,'comment XSS inert');
+  type('Second draft');
+  check(app.state.discussion.requestId!==firstAttempt.p_client_request_id,true,'a new draft gets a new request ID');
+  await app.loadIdeas();
+  check([composer.isConnected,composer.value],[true,'Second draft'],'Realtime refresh keeps the draft');
+  w.confirm=()=>true;
+  press(d.querySelector('.comment'),'Remove');
+  await wait(()=>d.querySelector('.comment.removed'));await settled();
+  check(calls.at(-1),{name:'remove_comment',args:{p_comment_id:'comment-1'}},'PI removes a comment');
+  check(d.querySelector('.comment.removed').textContent.includes('Comment removed by Shibo'),true,'removed comment placeholder');
+  check(d.querySelector('.comment.removed .markdown-body'),null,'removed body hidden in UI');
+  check(labels(card('IDEA-003')).includes('Discussion (1)'),true,'card count excludes removed comment');
+  await snapshot('discussion.html');
+  app.closeModal();
+
+  // ---- Conflicts, refresh coalescing, stale and offline states.
+  rpcError={message:'Already participating in this idea'};
+  await app.joinIdea(ideaById('idea-2'));check(text('notifications').includes('already participating'),true,'conflict notification');rpcError=null;
   let releaseRead;delayRead=new Promise(resolve=>releaseRead=resolve);
   const refresh=app.loadIdeas();const again=app.loadIdeas();check(refresh===again,true,'duplicate refresh coalescing');releaseRead();await refresh;
   readsFail=true;await app.loadIdeas();check(app.state.stale,true,'stale state surfaced');
@@ -186,11 +366,9 @@ try {
   Object.defineProperty(w.navigator,'onLine',{configurable:true,value:true});w.dispatchEvent(new w.Event('online'));await wait(()=>app.state.live);
   check(removed>0,true,'old channel cleaned up');
   currentId='member-1';await app.loadCurrentUser(session());
-  check(d.getElementById('create-button').hidden,true,'researcher create hidden');
-  check([...d.querySelectorAll('.idea button')].some(b=>b.textContent==='Delete'),false,'researcher delete hidden');
 
   // Two receiving frontends, neither of which submits the remote mutations.
-  // Disable periodic polling so only the delivered INSERT/UPDATE callbacks can
+  // Disable periodic polling so only the delivered idea_events INSERTs can
   // cause these refreshes. Transport delivery is simulated, not hosted Realtime.
   await wait(()=>app.state.live && !app.state.refreshTask);
   w.clearInterval(app.state.pollTimer);
@@ -212,41 +390,40 @@ try {
     observerWindow.clearInterval(observerWindow.__app.state.pollTimer);
     const receivers=[app.state,observerWindow.__app.state];
     check(receivers.map(s=>s.userId),['member-1','member-3'],'independent authorized receiver identities');
-    const deliver=(table,eventType,record)=>{
+    const deliverEvent=()=>{
       for (const receiver of [firstChannel,observerChannel]) {
-        receiver.handlers.filter(h=>h.filter.table===table && ['*',eventType].includes(h.filter.event))
-          .forEach(h=>h.callback({schema:'public',table,eventType,new:clone(record)}));
+        receiver.handlers.filter(h=>h.filter.table==='idea_events').forEach(h=>h.callback({schema:'public',table:'idea_events',eventType:'INSERT',new:clone(events.at(-1))}));
       }
     };
-    // Shibo mutates the shared source outside both receiving app instances.
-    currentId='member-0';
-    const remote=await client.rpc('create_idea',{p_title:'Remote notification test',p_description:'Synthetic',p_week_start:'2026-10-12',p_priority:'low'});
-    currentId='member-1';
-    check(receivers.every(s=>!s.ideas.some(i=>i.id===remote.data.id)),true,'receivers unchanged before INSERT delivery');
-    deliver('ideas','INSERT',remote.data);
-    await wait(()=>receivers.every(s=>s.ideas.some(i=>i.id===remote.data.id)));
-    check(receivers.every(s=>s.ideas.some(i=>i.title==='Remote notification test')),true,'INSERT refreshes both receivers');
-    currentId='member-0';
-    const changed=await client.rpc('update_idea',{p_idea_id:remote.data.id,p_expected_revision:remote.data.revision,p_title:'Remote updated title',p_description:'Synthetic',p_week_start:'2026-10-12',p_priority:'medium'});
-    currentId='member-1';
-    deliver('ideas','UPDATE',changed.data);
-    await wait(()=>receivers.every(s=>s.ideas.some(i=>i.title==='Remote updated title')));
-    check(receivers.every(s=>s.ideas.some(i=>i.title==='Remote updated title')),true,'UPDATE refreshes both receivers');
-    currentId='member-0';
-    await client.rpc('delete_idea',{p_idea_id:changed.data.id,p_expected_revision:changed.data.revision});
-    currentId='member-1';
+    const remote=async (member,name,args)=>{currentId=member;const result=await client.rpc(name,args);currentId='member-1';return result;};
+    await remote('member-2','join_idea',{p_idea_id:'idea-1'});
+    check(receivers.every(s=>!s.participants.some(p=>p.idea_id==='idea-1' && p.member_id==='member-2')),true,'receivers unchanged before delivery');
+    deliverEvent();
+    await wait(()=>receivers.every(s=>s.participants.some(p=>p.idea_id==='idea-1' && p.member_id==='member-2')));
+    check(true,true,'remote join reaches both receivers through the audit INSERT');
+    const junqiRow=participants.find(p=>p.idea_id==='idea-1' && p.member_id==='member-2');
+    await remote('member-2','submit_result',{p_idea_id:'idea-1',p_expected_revision:junqiRow.revision,p_result:'success',p_notes:null,p_experiment_url:null});
+    deliverEvent();
+    await wait(()=>receivers.every(s=>s.participants.some(p=>p.idea_id==='idea-1' && p.member_id==='member-2' && p.result==='success')));
+    check(receivers.every(s=>s.participants.find(p=>p.idea_id==='idea-1' && p.member_id==='member-0')?.result==='fail'),true,'remote result leaves Shibo result intact');
+    await remote('member-2','add_comment',{p_idea_id:'idea-1',p_body:'Remote comment',p_client_request_id:'00000000-0000-4000-8000-000000000099'});
+    deliverEvent();
+    await wait(()=>receivers.every(s=>s.commentCounts.get('idea-1')===1));
+    check(true,true,'remote comment count reaches both receivers');
+    const target=ideas.find(i=>i.id==='idea-1');
+    await remote('member-0','delete_idea',{p_idea_id:'idea-1',p_expected_revision:target.revision});
     check(events.at(-1).event_type,'deleted','remote deletion audit source');
-    check(receivers.every(s=>s.ideas.some(i=>i.id===remote.data.id)),true,'no direct DELETE notification or mutation refresh');
-    deliver('idea_events','INSERT',events.at(-1));
-    await wait(()=>receivers.every(s=>!s.ideas.some(i=>i.id===remote.data.id)));
-    check(receivers.every(s=>!s.ideas.some(i=>i.id===remote.data.id)),true,'audit INSERT alone removes deleted idea from both receivers');
-    check([d,observerWindow.document].every(doc=>!doc.getElementById('ideas').textContent.includes('Remote updated title')),true,'both rendered lists remove deleted idea');
+    deliverEvent();
+    await wait(()=>receivers.every(s=>!s.ideas.some(i=>i.id==='idea-1')));
+    check(receivers.every(s=>!s.participants.some(p=>p.idea_id==='idea-1')),true,'audit INSERT alone removes deleted idea and its participants');
+    check([d,observerWindow.document].every(doc=>!doc.getElementById('ideas').textContent.includes('Evaluate tool selection')),true,'both rendered lists remove deleted idea');
   } finally { observerWindow.close(); }
 
   await app.loadCurrentUser({user:{id:'outsider'},access_token:'test'});
   check(d.getElementById('dashboard').hidden,true,'unauthorized cannot enter dashboard');
   check(text('access-title'),'Access has not been granted','allowlist denial');
   check(d.querySelectorAll('.idea').length,0,'previous account data cleared');
+  check(app.state.participants.length,0,'previous participant data cleared');
   currentId='member-0';await app.loadCurrentUser(session());
 
   const markdown = '\uFEFF# Suggested **research** title\r\n\r\n## Method\r\n- **Bold** and *italic*\r\n- ~~Discarded~~\r\n\r\n| Model | Score |\r\n| --- | --- |\r\n| A | $x_i^2$ |\r\n\r\nInline $\\alpha_i+\\beta$ and [paper](https://example.org/paper).\r\n\r\n$$\r\n\\begin{aligned} a &= b \\\\ c &= \\sqrt{x} \\end{aligned}\r\n$$\r\n\r\n```python\r\n# Not another idea\r\nprint("$literal$")\r\n```\r\n\r\n# A second H1 stays in the same idea\r\n\r\n$$x$$ trailing explanation\r\n\r\n$$\\text{cost: \\$5}$$\r\n';
