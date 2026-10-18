@@ -81,6 +81,16 @@ function perform(name,args) {
     const before = clone(comment); Object.assign(comment,{removed_at:'2026-10-16T15:00:00Z',removed_by:currentId});
     record(ideas.find(i=>i.id===comment.idea_id),'comment_removed',before,comment); return ok(comment);
   }
+  if (name==='reply_to_comment') {
+    const existing = comments.find(c=>c.author_id===currentId && c.client_request_id===args.p_client_request_id);
+    if (existing) return existing.parent_comment_id===args.p_parent_comment_id ? ok(existing) : fail('Comment request ID already used');
+    const parent = comments.find(c=>c.id===args.p_parent_comment_id);
+    if (!parent) return fail('Comment not found');
+    if (parent.removed_at) return fail('Cannot reply to a removed comment');
+    const reply = {id:`comment-${serial++}`,idea_id:parent.idea_id,author_id:currentId,body:args.p_body,client_request_id:args.p_client_request_id,
+      parent_comment_id:parent.id,created_at:new Date(Date.parse('2026-10-16T15:00:00Z')+serial*1000).toISOString(),removed_at:null,removed_by:null};
+    comments.push(reply); record(ideas.find(i=>i.id===parent.idea_id),'commented',null,reply); return ok(reply);
+  }
   if (!idea) return fail('Idea not found');
   if (name==='update_idea') {
     if (idea.revision!==args.p_expected_revision) return fail('Idea changed. Refresh and try again');
@@ -399,6 +409,97 @@ try {
   check(app.state.commentDrafts.size,0,'drafts never carry over to another account');
   currentId='member-0';await app.loadCurrentUser(session());await settled();
 
+  // ---- Threaded replies: inline Reply composer, nesting, collapse, drafts, removal.
+  const commentNode = (number,id) => [...card(number).querySelectorAll('li.comment')].find(li=>li.dataset.commentId===id);
+  const own = (li,selector) => li.querySelector(`:scope > .comment-main > ${selector}`);
+  const submitForm = form => form.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+  const typeInto = (box,value) => { box.value=value; box.dispatchEvent(new w.Event('input')); };
+  const openReply = id => { press(own(commentNode('IDEA-004',id),'.comment-actions'),'Reply'); return own(commentNode('IDEA-004',id),'.reply-slot .comment-input'); };
+  openCard('IDEA-004');
+  type('IDEA-004','Root for replies');postIn('IDEA-004');await settled();
+  const rootId=comments.find(c=>c.body==='Root for replies').id;
+  await wait(()=>commentNode('IDEA-004',rootId));
+  check(labels(own(commentNode('IDEA-004',rootId),'.comment-actions')),['Reply'],'every comment has a Reply control');
+  let replyBox=openReply(rootId);
+  check([!!replyBox,d.activeElement===replyBox,replyBox.placeholder,d.getElementById('modal').open],[true,true,'Reply to Shibo…',false],'inline reply composer opens under the comment, focused');
+  const replyForm=()=>own(commentNode('IDEA-004',rootId),'.reply-slot form');
+  submitForm(replyForm());
+  check(replyForm().querySelector('.error-text').textContent,'Write a reply before posting.','empty reply rejected');
+  const replyText='**Nested** $y^2$ <img src=x onerror=alert(1)> [x](javascript:alert(1))';
+  typeInto(replyBox,replyText);
+  loseNextResponse=true;submitForm(replyForm());await settled();
+  const firstReplyCall=calls.at(-1);
+  check([firstReplyCall.name,Object.keys(firstReplyCall.args),firstReplyCall.args.p_parent_comment_id],['reply_to_comment',['p_parent_comment_id','p_body','p_client_request_id'],rootId],'reply RPC sends only the parent, body and request ID');
+  check(own(commentNode('IDEA-004',rootId),'.reply-slot .comment-input')?.value,replyText,'reply draft kept after an uncertain failure');
+  submitForm(replyForm());await settled();
+  check(calls.at(-1).args.p_client_request_id,firstReplyCall.args.p_client_request_id,'reply retry reuses the request ID');
+  check(comments.filter(c=>c.parent_comment_id===rootId).length,1,'lost response plus retry posts one reply');
+  const firstReply=comments.find(c=>c.parent_comment_id===rootId);
+  await wait(()=>commentNode('IDEA-004',firstReply.id));
+  let replyLi=commentNode('IDEA-004',firstReply.id);
+  check([replyLi.parentElement===own(commentNode('IDEA-004',rootId),'.replies'),replyLi.dataset.depth,own(commentNode('IDEA-004',rootId),'.reply-slot').children.length],[true,'1',0],'reply nested under its parent; composer closed');
+  check([replyLi.querySelector('.comment-head strong').textContent,!!replyLi.querySelector('.markdown-body strong'),!!replyLi.querySelector('.katex'),!!replyLi.querySelector('time[datetime]')],['Shibo',true,true,true],'reply shows author, time, Markdown and math');
+  check(replyLi.querySelector('img,script,[onerror],a[href^="javascript"]'),null,'reply XSS inert');
+  check(card('IDEA-004').querySelector('.discussion-head h3').textContent,'Discussion (2)','replies count toward the discussion total');
+  let parentId=firstReply.id;
+  for (let level=2;level<=6;level++) {
+    typeInto(openReply(parentId),`Level ${level}`);
+    submitForm(own(commentNode('IDEA-004',parentId),'.reply-slot form'));await settled();
+    parentId=comments.find(c=>c.body===`Level ${level}`).id;
+    await wait(()=>commentNode('IDEA-004',parentId));
+  }
+  const deepest=commentNode('IDEA-004',parentId), level3=commentNode('IDEA-004',comments.find(c=>c.body==='Level 3').id);
+  check([deepest.dataset.depth,deepest.classList.contains('capped'),deepest.parentElement.classList.contains('flat'),own(level3,'.replies').classList.contains('flat')],
+    ['6',true,true,false],'six levels nest; indentation stops after four');
+  check(deepest.querySelector('.replying-to').textContent,'↪ Shibo','capped replies still name their parent');
+  check(own(level3,'.replies').classList.contains('flat-mobile'),true,'phones stop indenting after two levels');
+  const rootToggle=()=>own(commentNode('IDEA-004',rootId),'.comment-actions .thread-toggle');
+  check(rootToggle().textContent,'Hide replies','thread expanded by default');
+  rootToggle().click();
+  check([own(commentNode('IDEA-004',rootId),'.replies').hidden,rootToggle().textContent],[true,'Show 6 replies'],'long thread collapses');
+  rootToggle().click();
+  check(own(commentNode('IDEA-004',rootId),'.replies').hidden,false,'thread expands again');
+
+  // An open reply box survives Realtime refreshes untouched.
+  const draftBox=openReply(rootId);
+  typeInto(draftBox,'Reply draft in progress');draftBox.focus();draftBox.setSelectionRange(6,6);
+  currentId='member-2';
+  await client.rpc('reply_to_comment',{p_parent_comment_id:rootId,p_body:'Remote nested reply',p_client_request_id:'00000000-0000-4000-8000-000000000077'});
+  await client.rpc('add_comment',{p_idea_id:'idea-4',p_body:'Remote top-level',p_client_request_id:'00000000-0000-4000-8000-000000000078'});
+  currentId='member-0';
+  await app.loadIdeas();
+  check([own(commentNode('IDEA-004',rootId),'.reply-slot .comment-input')===draftBox,draftBox.value,d.activeElement===draftBox,draftBox.selectionStart],[true,'Reply draft in progress',true,6],'open reply box keeps its node, text, focus and caret');
+  const remoteReply=comments.find(c=>c.body==='Remote nested reply');
+  check(commentNode('IDEA-004',remoteReply.id)?.parentElement===own(commentNode('IDEA-004',rootId),'.replies'),true,'remote reply inserted under the right parent while typing');
+  check([card('IDEA-004').textContent.includes('Remote top-level'),card('IDEA-004').querySelector('.discussion-head h3').textContent],[true,'Discussion (9)'],'remote top-level comment and count update while typing');
+  draftBox.blur();await app.loadIdeas();
+  const rebuiltBox=own(commentNode('IDEA-004',rootId),'.reply-slot .comment-input');
+  check([rebuiltBox!==draftBox,rebuiltBox.value],[true,'Reply draft in progress'],'rebuilt thread restores the open reply box and its draft');
+  w.confirm=()=>false;press(own(commentNode('IDEA-004',rootId),'.reply-slot form'),'Cancel');
+  check(own(commentNode('IDEA-004',rootId),'.reply-slot .comment-input')?.value,'Reply draft in progress','cancel asks before discarding a draft');
+  w.confirm=()=>true;press(own(commentNode('IDEA-004',rootId),'.reply-slot form'),'Cancel');
+  check([own(commentNode('IDEA-004',rootId),'.reply-slot').children.length,app.state.commentDrafts.has(`reply:${rootId}`)],[0,false],'cancel closes the reply box and discards the draft');
+
+  // Sorting applies to top-level comments; replies stay chronological.
+  const sort4=card('IDEA-004').querySelector('.discussion-head select');sort4.value='newest';sort4.dispatchEvent(new w.Event('change'));
+  const topBodies=()=>[...card('IDEA-004').querySelectorAll('.comment-list > li.comment')].map(li=>own(li,'.comment-content').textContent.trim());
+  check(topBodies(),['Remote top-level','Root for replies'],'newest-first top-level order');
+  check([...own(commentNode('IDEA-004',rootId),'.replies').children].map(li=>li.dataset.commentId),[firstReply.id,remoteReply.id],'replies stay oldest-first');
+  sort4.value='oldest';sort4.dispatchEvent(new w.Event('change'));
+
+  // Removing a parent keeps its replies and closes it to new replies.
+  press(own(commentNode('IDEA-004',rootId),'.comment-head'),'Remove');
+  await wait(()=>commentNode('IDEA-004',rootId)?.classList.contains('removed'));await settled();
+  const removedRoot=commentNode('IDEA-004',rootId);
+  check([own(removedRoot,'.comment-content').textContent.includes('Comment removed by Shibo'),own(removedRoot,'.replies').children.length,labels(own(removedRoot,'.comment-actions')).includes('Reply')],
+    [true,2,false],'removed parent shows a placeholder and keeps its replies');
+  check(labels(own(commentNode('IDEA-004',firstReply.id),'.comment-actions')).includes('Reply'),true,'replies under a removed parent can still be answered');
+  typeInto(openReply(firstReply.id),'Draft **reply** with $x^2$');await snapshot('replies.html');
+  w.confirm=()=>true;press(own(commentNode('IDEA-004',firstReply.id),'.reply-slot form'),'Cancel');
+  app.openHistory(ideaById('idea-4'));await wait(()=>d.querySelectorAll('.history li').length>0);
+  check(text('modal-body').includes('replied to Shibo’s comment'),true,'history shows replies');
+  app.closeModal();
+
   // ---- Conflicts, refresh coalescing, stale and offline states.
   rpcError={message:'Already participating in this idea'};
   await app.joinIdea(ideaById('idea-2'));check(text('notifications').includes('already participating'),true,'conflict notification');rpcError=null;
@@ -457,6 +558,11 @@ try {
     deliverEvent();
     await wait(()=>receivers.every(s=>s.commentCounts.get('idea-1')===1));
     check(true,true,'remote comment count reaches both receivers');
+    const remoteParent=comments.find(c=>c.idea_id==='idea-1' && c.body==='Remote comment');
+    await remote('member-3','reply_to_comment',{p_parent_comment_id:remoteParent.id,p_body:'Remote reply',p_client_request_id:'00000000-0000-4000-8000-000000000098'});
+    deliverEvent();
+    await wait(()=>receivers.every(s=>(s.commentsByIdea.get('idea-1') || []).some(c=>c.parent_comment_id===remoteParent.id)));
+    check(receivers.every(s=>s.commentCounts.get('idea-1')===2),true,'remote reply reaches both receivers');
     const target=ideas.find(i=>i.id==='idea-1');
     await remote('member-0','delete_idea',{p_idea_id:'idea-1',p_expected_revision:target.revision});
     check(events.at(-1).event_type,'deleted','remote deletion audit source');

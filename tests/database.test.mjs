@@ -32,9 +32,9 @@ try {
   await db.initialise(); await db.start();
   const admin = db.getPgClient(); await admin.connect(); clients.push(admin);
   await admin.query(`create role anon nologin; create role authenticated nologin; ${authStub}`);
-  const [schema, exportSQL, dropArchiveSQL, v1Schema] = await Promise.all([read('../supabase/schema.sql'),read('../supabase/export_v1_backup.sql'),
-    read('../supabase/drop_v1_archive.sql'),read('./fixtures/schema_v1.sql')]);
-  for (const [name,sql] of [['schema.sql',schema],['export',exportSQL],['archive cleanup',dropArchiveSQL]]) {
+  const [schema, exportSQL, dropArchiveSQL, v1Schema, repliesMigration, v20Schema] = await Promise.all([read('../supabase/schema.sql'),read('../supabase/export_v1_backup.sql'),
+    read('../supabase/drop_v1_archive.sql'),read('./fixtures/schema_v1.sql'),read('../supabase/migrations/add_comment_replies.sql'),read('./fixtures/schema_v2_0.sql')]);
+  for (const [name,sql] of [['schema.sql',schema],['export',exportSQL],['archive cleanup',dropArchiveSQL],['replies migration',repliesMigration]]) {
     check(/```|\\[_*<>]|&(?:lt|gt);/.test(sql),false,`${name} is plain SQL, not escaped Markdown`);
     check(/\bcascade\b/i.test(sql.replace(/--.*$/gm,'')),false,`${name} uses no CASCADE`);
   }
@@ -51,11 +51,11 @@ try {
   check((await admin.query("select count(*)::int n from pg_constraint where contype='f' and connamespace='public'::regnamespace and confdeltype='c'")).rows[0].n,0,'no ON DELETE CASCADE foreign keys');
   check((await admin.query("select count(*)::int n from information_schema.columns where table_schema='public' and table_name='ideas' and column_name in ('status','assigned_to','result','notes','experiment_url','completed_at')")).rows[0].n,0,'no single-assignee columns on ideas');
   check((await admin.query("select count(*)::int n from pg_proc where proname in ('claim_idea','release_idea','complete_idea','reopen_idea')")).rows[0].n,0,'no V1 RPCs');
-  const rpcNames = ['create_idea','update_idea','delete_idea','join_idea','leave_idea','submit_result','reopen_result','add_comment','remove_comment'];
+  const rpcNames = ['create_idea','update_idea','delete_idea','join_idea','leave_idea','submit_result','reopen_result','add_comment','reply_to_comment','remove_comment'];
   const acl = await admin.query(`select p.proname, has_function_privilege('anon',p.oid,'EXECUTE') as anon,
     has_function_privilege('authenticated',p.oid,'EXECUTE') as member, p.proconfig, p.prosecdef
     from pg_proc p where p.pronamespace='public'::regnamespace and p.proname = any($1)`,[rpcNames]);
-  check(acl.rows.map(r => r.proname).sort(),[...rpcNames].sort(),'nine V2 RPCs');
+  check(acl.rows.map(r => r.proname).sort(),[...rpcNames].sort(),'ten V2 RPCs');
   for (const fn of acl.rows) check([fn.anon,fn.member,fn.prosecdef,fn.proconfig.includes('search_path=""')],[false,true,true,true],`${fn.proname}: grants and fixed search path`);
   check((await admin.query("select pg_get_function_identity_arguments('public.submit_result'::regproc)")).rows[0].pg_get_function_identity_arguments,
     'p_idea_id uuid, p_expected_revision bigint, p_result text, p_notes text, p_experiment_url text','submit_result has no member parameter');
@@ -196,6 +196,59 @@ try {
   await rejects(() => rpc(shibo,'remove_comment',[comment.id]),/Comment not found/,'already removed');
   check((await events(target)).filter(e => ['commented','comment_removed'].includes(e.event_type)).length,5,'comment history recorded');
 
+  // ---- Threaded replies: same-idea tree, immutability, idempotency, removed parents.
+  const threadIdea = await create(shibo,'Threaded discussion');
+  const otherIdea = await create(shibo,'Another idea');
+  const root = await rpc(yan,'add_comment',[threadIdea.id,'Root comment',randomUUID()]);
+  check(root.parent_comment_id,null,'add_comment creates a top-level comment');
+  const replyRequest = randomUUID(), replyBody = '**Reply** with $x$ <img src=x onerror=alert(1)>\r\n';
+  const reply = await rpc(junqi,'reply_to_comment',[root.id,replyBody,replyRequest]);
+  check([reply.idea_id,reply.parent_comment_id,reply.author_id,reply.body],[threadIdea.id,root.id,users.Junqi,replyBody],'reply stored verbatim under its parent and idea');
+  const chain = [reply];
+  for (const [index,client] of [shibo,yifan,yan,junqi,shibo].entries()) chain.push(await rpc(client,'reply_to_comment',[chain.at(-1).id,`Level ${index + 2}`,randomUUID()]));
+  check((await admin.query(`with recursive t as (select id, 0 d from public.idea_comments where id=$1
+    union all select c.id, t.d + 1 from public.idea_comments c join t on c.parent_comment_id = t.id) select max(d)::int d from t`,[root.id])).rows[0].d,6,'six levels of nested replies');
+  check((await rpc(junqi,'reply_to_comment',[root.id,'ignored',replyRequest])).id,reply.id,'retried reply returns the original');
+  check((await admin.query('select count(*)::int n from public.idea_comments where client_request_id=$1',[replyRequest])).rows[0].n,1,'no duplicate reply');
+  await rejects(() => rpc(junqi,'reply_to_comment',[chain[1].id,'x',replyRequest]),/already used/,'request ID cannot move to another parent');
+  await rejects(() => rpc(junqi,'add_comment',[threadIdea.id,'x',replyRequest]),/already used/,'reply request ID cannot become a top-level comment');
+  await rejects(() => rpc(yan,'reply_to_comment',[randomUUID(),'x',randomUUID()]),/Comment not found/,'reply to a missing comment');
+  await rejects(() => rpc(outsider,'reply_to_comment',[root.id,'x',randomUUID()]),/Permission denied/,'outsider cannot reply');
+  await rejects(() => rpc(anon,'reply_to_comment',[root.id,'x',randomUUID()]),/permission denied/,'anon cannot execute the reply RPC');
+  await rejects(() => rpc(yan,'reply_to_comment',[root.id,' \n ',randomUUID()]),/check constraint/,'whitespace-only reply rejected');
+  await rejects(() => rpc(yan,'reply_to_comment',[root.id,'x'.repeat(20481),randomUUID()]),/check constraint/,'oversized reply rejected');
+  await rejects(() => rpc(yan,'reply_to_comment',[root.id,'x',null]),/Missing comment request ID/,'reply request ID required');
+  // Cross-idea links and cycles are impossible, even for the database owner.
+  const otherRoot = await rpc(yan,'add_comment',[otherIdea.id,'Other idea comment',randomUUID()]);
+  await rejects(() => admin.query("insert into public.idea_comments(idea_id,author_id,body,client_request_id,parent_comment_id) values ($1,$2,'cross',gen_random_uuid(),$3)",[threadIdea.id,users.Yan,otherRoot.id]),/comment_parent_same_idea/,'parent must belong to the same idea');
+  await rejects(() => admin.query("insert into public.idea_comments(idea_id,author_id,body,client_request_id,parent_comment_id) values ($1,$2,'orphan',gen_random_uuid(),gen_random_uuid())",[threadIdea.id,users.Yan]),/comment_parent_same_idea/,'parent must exist');
+  const selfId = randomUUID();
+  await rejects(() => admin.query("insert into public.idea_comments(id,idea_id,author_id,body,client_request_id,parent_comment_id) values ($1,$2,$3,'self',gen_random_uuid(),$1)",[selfId,threadIdea.id,users.Yan]),/comment_not_own_parent/,'a comment cannot be its own parent');
+  await rejects(() => admin.query('update public.idea_comments set parent_comment_id=$1 where id=$2',[chain.at(-1).id,root.id]),/Comments are immutable/,'parent links cannot change, so no cycle can form');
+  await rejects(() => admin.query("update public.idea_comments set body='edited' where id=$1",[reply.id]),/Comments are immutable/,'comment text is immutable');
+  await rejects(() => yan.query("update public.idea_comments set parent_comment_id=null where id=$1",[reply.id]),/permission denied/,'clients cannot update comments');
+  // Removing a parent keeps the thread.
+  await rejects(() => rpc(yan,'remove_comment',[root.id]),/Permission denied/,'researcher cannot remove a comment');
+  await rpc(shibo,'remove_comment',[root.id]);
+  check((await admin.query('select count(*)::int n from public.idea_comments where idea_id=$1',[threadIdea.id])).rows[0].n,7,'removing a parent keeps every reply');
+  await rejects(() => rpc(yifan,'reply_to_comment',[root.id,'x',randomUUID()]),/Cannot reply to a removed comment/,'no new replies to a removed comment');
+  check((await rpc(yifan,'reply_to_comment',[reply.id,'Still possible under a removed parent',randomUUID()])).parent_comment_id,reply.id,'the thread under a removed parent stays usable');
+  await rejects(() => admin.query('update public.idea_comments set removed_at=null, removed_by=null where id=$1',[root.id]),/Comments are immutable/,'a removal cannot be undone or edited');
+  const replyEvents = (await events(threadIdea.id)).filter(e => e.event_type === 'commented' && e.new_state.parent_comment_id);
+  check([replyEvents.length,replyEvents[0].new_state.parent_comment_id,replyEvents[0].actor_id],[7,root.id,users.Junqi],'replies recorded in activity history');
+  // Two members reply to the same comment at the same time.
+  await yan.query('begin');
+  await rpc(yan,'reply_to_comment',[reply.id,'Concurrent A',randomUUID()]);
+  const concurrentReply = rpc(junqi,'reply_to_comment',[reply.id,'Concurrent B',randomUUID()]);
+  check(await settlesWithin(concurrentReply,3000),'settled','a second member replies while the first reply is uncommitted');
+  await yan.query('commit');
+  check((await admin.query("select count(*)::int n from public.idea_comments where parent_comment_id=$1 and body like 'Concurrent%'",[reply.id])).rows[0].n,2,'both concurrent replies stored');
+  // Deleting the idea removes the whole tree in one statement and snapshots it.
+  await rpc(shibo,'delete_idea',[threadIdea.id,(await idea(threadIdea.id)).revision]);
+  const treeSnapshot = (await events(threadIdea.id)).at(-1).previous_state.comments;
+  check([treeSnapshot.length,treeSnapshot.filter(c => c.parent_comment_id).length,(await admin.query('select count(*)::int n from public.idea_comments where idea_id=$1',[threadIdea.id])).rows[0].n],
+    [10,9,0],'deletion snapshot keeps the whole reply tree');
+
   // ---- Deactivated members lose access; their results remain attributed.
   await admin.query('update public.profiles set active=false where id=$1',[users.Junqi]);
   for (const table of tables) check((await junqi.query(`select * from public.${table}`)).rowCount,0,`deactivated member cannot read ${table}`);
@@ -268,6 +321,11 @@ try {
       change:async id => rpc(shibo,'remove_comment',[(await admin.query('select id from public.idea_comments where idea_id=$1',[id])).rows[0].id]),
       committed:s => s.comments.some(c => c.body === 'Comment under race' && c.removed_by === users.Shibo),
       untouched:s => s.comments.some(c => c.body === 'Comment under race' && c.removed_at === null)},
+    {name:'reply_to_comment',client:junqi,
+      prepare:async id => { await rpc(yan,'add_comment',[id,'Parent under race',randomUUID()]); },
+      change:async id => rpc(junqi,'reply_to_comment',[(await admin.query('select id from public.idea_comments where idea_id=$1',[id])).rows[0].id,'Reply under race',randomUUID()]),
+      committed:s => s.comments.some(c => c.body === 'Reply under race' && c.parent_comment_id),
+      untouched:s => !s.comments.some(c => c.body === 'Reply under race')},
   ];
   for (const race of raceCases) {
     const first = await create(shibo,`${race.name} before deletion`); await race.prepare(first.id);
@@ -428,7 +486,66 @@ try {
   await rejects(() => v1.query(confirmedDrop),/No V1 archive found/,'archive removal is not repeatable');
   await v1.query('rollback');
 
-  console.log(`PASS: ${checks} PostgreSQL checks, including concurrent participation, parallel independent results, comment idempotency, publication WAL filtering, parent-before-child deletion races, and the backup-verified single-transaction V1 upgrade. Hosted Supabase was not used.`);
+
+  // ---- Replies migration on a database built from the deployed V2 schema.
+  await admin.query('create database v2_replies');
+  const live = db.getPgClient('v2_replies'); await live.connect(); clients.push(live);
+  await live.query(authStub);
+  await live.query(v20Schema);
+  for (const [name,id] of Object.entries(users)) {
+    await live.query('insert into auth.users values ($1)',[id]);
+    if (name !== 'Outsider') await live.query('insert into public.profiles(id,display_name,role) values ($1,$2,$3)',[id,name,name === 'Shibo' ? 'pi' : 'researcher']);
+  }
+  const [liveShibo,liveYan,liveJunqi] = await Promise.all(['Shibo','Yan','Junqi'].map(name => member(name,'authenticated','v2_replies')));
+  const liveIdea = await create(liveShibo,'Live idea with data');
+  const liveJoin = await rpc(liveYan,'join_idea',[liveIdea.id]);
+  await rpc(liveYan,'submit_result',[liveIdea.id,liveJoin.revision,'success','Live result',null]);
+  await rpc(liveJunqi,'join_idea',[liveIdea.id]);
+  const liveComment = await rpc(liveYan,'add_comment',[liveIdea.id,'Existing **comment** $x$',randomUUID()]);
+  const removedLive = await rpc(liveJunqi,'add_comment',[liveIdea.id,'Existing removed comment',randomUUID()]);
+  await rpc(liveShibo,'remove_comment',[removedLive.id]);
+  const gone = await create(liveShibo,'Deleted live idea');
+  await rpc(liveYan,'add_comment',[gone.id,'Comment on a deleted idea',randomUUID()]);
+  await rpc(liveShibo,'delete_idea',[gone.id,gone.revision]);
+  const liveState = async () => (await live.query(`select
+    (select md5(string_agg(to_jsonb(i)::text, ',' order by i.id)) from public.ideas i) ideas,
+    (select md5(string_agg(to_jsonb(p)::text, ',' order by p.idea_id, p.member_id)) from public.idea_participants p) participants,
+    (select md5(string_agg((to_jsonb(c) - 'parent_comment_id')::text, ',' order by c.id)) from public.idea_comments c) comments,
+    (select md5(string_agg(to_jsonb(e)::text, ',' order by e.id)) from public.idea_events e) events,
+    (select md5(string_agg(to_jsonb(p)::text, ',' order by p.id)) from public.profiles p) profiles,
+    (select md5(string_agg(u.id::text, ',' order by u.id)) from auth.users u) users`)).rows[0];
+  const beforeMigration = await liveState();
+  check((await live.query("select to_regprocedure('public.reply_to_comment(uuid,text,uuid)') r")).rows[0].r,null,'deployed V2 has no reply RPC yet');
+  await live.query(repliesMigration);
+  check(await liveState(),beforeMigration,'migration preserves ideas, results, comments, removals, history, profiles and users');
+  check((await live.query('select count(*)::int n from public.idea_comments where parent_comment_id is not null')).rows[0].n,0,'existing comments become top-level');
+  const liveReply = await rpc(liveJunqi,'reply_to_comment',[liveComment.id,'First reply after migration',randomUUID()]);
+  check([liveReply.parent_comment_id,liveReply.idea_id],[liveComment.id,liveIdea.id],'replies work after the migration');
+  check((await rpc(liveYan,'add_comment',[liveIdea.id,'Old-style call',randomUUID()])).parent_comment_id,null,'existing add_comment calls keep working');
+  await rejects(() => rpc(liveYan,'reply_to_comment',[removedLive.id,'x',randomUUID()]),/Cannot reply to a removed comment/,'migrated removed comments stay closed');
+  check((await live.query("select event_type, new_state->>'parent_comment_id' p from public.idea_events order by id desc limit 2")).rows.map(r => [r.event_type,r.p]),
+    [['commented',null],['commented',liveComment.id]],'replies reach activity history and the Realtime source');
+  const beforeRerun2 = await liveState();
+  await live.query(repliesMigration);
+  check(await liveState(),beforeRerun2,'rerunning the migration changes nothing');
+  // The migrated and the freshly installed databases define identical comment objects.
+  const commentCatalog = async client => (await client.query(`select
+    (select string_agg(conname || ':' || pg_get_constraintdef(oid), ' | ' order by conname) from pg_constraint where conrelid = 'public.idea_comments'::regclass) constraints,
+    (select string_agg(indexdef, ' | ' order by indexname) from pg_indexes where schemaname = 'public' and tablename = 'idea_comments') indexes,
+    (select string_agg(tgname, ',' order by tgname) from pg_trigger where tgrelid = 'public.idea_comments'::regclass and not tgisinternal) triggers,
+    (select string_agg(column_name || ' ' || data_type || ' ' || is_nullable, ',' order by ordinal_position) from information_schema.columns where table_schema = 'public' and table_name = 'idea_comments') columns,
+    (select string_agg(p.proname || ':' || md5(pg_get_functiondef(p.oid)) || ':' || has_function_privilege('authenticated',p.oid,'EXECUTE') || has_function_privilege('anon',p.oid,'EXECUTE'), ',' order by p.proname)
+      from pg_proc p where p.proname in ('add_comment','reply_to_comment','remove_comment','guard_comment_update','audit_comment','delete_idea')) functions`)).rows[0];
+  check(await commentCatalog(live),await commentCatalog(admin),'migrated and freshly installed comment schemas are identical');
+  await live.query(schema);
+  check(await liveState(),beforeRerun2,'running the full schema.sql afterwards changes nothing');
+  await admin.query('create database not_v2');
+  const notV2 = db.getPgClient('not_v2'); await notV2.connect(); clients.push(notV2);
+  await notV2.query(authStub);
+  await rejects(() => notV2.query(repliesMigration),/requires the V2 schema/,'migration refuses to run without V2');
+  await notV2.query('rollback');
+
+  console.log(`PASS: ${checks} PostgreSQL checks, including threaded replies and their additive migration, concurrent participation, parallel independent results, comment idempotency, publication WAL filtering, parent-before-child deletion races, and the backup-verified single-transaction V1 upgrade. Hosted Supabase was not used.`);
 } finally {
   await Promise.allSettled(clients.map(client => client.end()));
   await db.stop(); await rm(directory,{recursive:true,force:true});

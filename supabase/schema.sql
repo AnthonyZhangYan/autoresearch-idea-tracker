@@ -197,6 +197,34 @@ create table if not exists public.idea_comments (
   constraint comment_request_once unique (author_id, client_request_id)
 );
 
+-- Threaded replies. A reply points at a comment of the SAME idea: the composite
+-- foreign key (parent_comment_id, idea_id) -> (id, idea_id) enforces both that
+-- the parent exists and that it belongs to the same idea. Comments are
+-- immutable (guard_comment_update) and a parent must exist before its reply,
+-- so the replies always form a tree: cycles cannot occur. Comments without a
+-- parent are top-level. Written as idempotent ALTERs so the same statements
+-- upgrade an existing V2 database and build a fresh one.
+alter table public.idea_comments add column if not exists parent_comment_id uuid;
+do $$
+begin
+  if not exists (select 1 from pg_constraint
+      where conrelid = 'public.idea_comments'::regclass and conname = 'comment_id_idea_unique') then
+    alter table public.idea_comments add constraint comment_id_idea_unique unique (id, idea_id);
+  end if;
+  if not exists (select 1 from pg_constraint
+      where conrelid = 'public.idea_comments'::regclass and conname = 'comment_parent_same_idea') then
+    alter table public.idea_comments add constraint comment_parent_same_idea
+      foreign key (parent_comment_id, idea_id) references public.idea_comments (id, idea_id);
+  end if;
+  if not exists (select 1 from pg_constraint
+      where conrelid = 'public.idea_comments'::regclass and conname = 'comment_not_own_parent') then
+    alter table public.idea_comments add constraint comment_not_own_parent
+      check (parent_comment_id is distinct from id);
+  end if;
+end;
+$$;
+create index if not exists idea_comments_parent_idx on public.idea_comments(parent_comment_id);
+
 create table if not exists public.idea_events (
   id bigint generated always as identity primary key,
   -- Intentionally no idea FK: deletion preserves immutable historical snapshots.
@@ -343,6 +371,23 @@ $$;
 drop trigger if exists idea_comments_audit on public.idea_comments;
 create trigger idea_comments_audit after insert or update on public.idea_comments
   for each row execute function tracker_private.audit_comment();
+
+-- Comments are immutable. The only permitted change is the PI's one-time
+-- removal (remove_comment), which sets removed_at/removed_by and nothing else.
+create or replace function tracker_private.guard_comment_update()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if old.removed_at is not null
+    or (new.id, new.idea_id, new.author_id, new.body, new.client_request_id, new.created_at, new.parent_comment_id)
+      is distinct from (old.id, old.idea_id, old.author_id, old.body, old.client_request_id, old.created_at, old.parent_comment_id) then
+    raise exception 'Comments are immutable';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists idea_comments_immutable on public.idea_comments;
+create trigger idea_comments_immutable before update on public.idea_comments
+  for each row execute function tracker_private.guard_comment_update();
 
 -- Lock order is always PARENT IDEA FIRST, then child rows:
 --   * every participant/comment change first takes FOR KEY SHARE on the idea
@@ -537,7 +582,47 @@ begin
   if not found then
     select * into v_comment from public.idea_comments
     where author_id = auth.uid() and client_request_id = p_client_request_id;
-    if v_comment.idea_id <> p_idea_id then raise exception 'Comment request ID already used'; end if;
+    if v_comment.idea_id <> p_idea_id or v_comment.parent_comment_id is not null then
+      raise exception 'Comment request ID already used';
+    end if;
+  end if;
+  return v_comment;
+end;
+$$;
+
+-- Reply to any comment or reply. The idea is taken from the parent, so a reply
+-- can never be attached to another idea. Same idempotency as add_comment: the
+-- same client request ID returns the original reply instead of a duplicate.
+create or replace function public.reply_to_comment(p_parent_comment_id uuid, p_body text, p_client_request_id uuid)
+returns public.idea_comments language plpgsql security definer set search_path = '' as $$
+declare v_comment public.idea_comments; v_parent public.idea_comments; v_idea_id uuid;
+begin
+  perform tracker_private.require_member();
+  if p_client_request_id is null then raise exception 'Missing comment request ID'; end if;
+  select * into v_comment from public.idea_comments
+  where author_id = auth.uid() and client_request_id = p_client_request_id;
+  if found then
+    if v_comment.parent_comment_id is distinct from p_parent_comment_id then
+      raise exception 'Comment request ID already used';
+    end if;
+    return v_comment; -- an earlier attempt already succeeded
+  end if;
+  select idea_id into v_idea_id from public.idea_comments where id = p_parent_comment_id;
+  if not found then raise exception 'Comment not found'; end if;
+  perform tracker_private.require_idea(v_idea_id); -- parent idea before child rows
+  select * into v_parent from public.idea_comments where id = p_parent_comment_id;
+  if not found then raise exception 'Comment not found'; end if;
+  if v_parent.removed_at is not null then raise exception 'Cannot reply to a removed comment'; end if;
+  insert into public.idea_comments(idea_id, author_id, body, client_request_id, parent_comment_id)
+  values (v_parent.idea_id, auth.uid(), p_body, p_client_request_id, p_parent_comment_id)
+  on conflict on constraint comment_request_once do nothing
+  returning * into v_comment;
+  if not found then
+    select * into v_comment from public.idea_comments
+    where author_id = auth.uid() and client_request_id = p_client_request_id;
+    if v_comment.parent_comment_id is distinct from p_parent_comment_id then
+      raise exception 'Comment request ID already used';
+    end if;
   end if;
   return v_comment;
 end;
@@ -569,6 +654,7 @@ revoke all on function tracker_private.touch_row() from public, anon, authentica
 revoke all on function tracker_private.audit_idea() from public, anon, authenticated;
 revoke all on function tracker_private.audit_participant() from public, anon, authenticated;
 revoke all on function tracker_private.audit_comment() from public, anon, authenticated;
+revoke all on function tracker_private.guard_comment_update() from public, anon, authenticated;
 grant execute on function tracker_private.member_role() to authenticated;
 
 revoke all on function public.create_idea(text, text, date, text) from public, anon, authenticated;
@@ -580,6 +666,7 @@ revoke all on function public.submit_result(uuid, bigint, text, text, text) from
 revoke all on function public.reopen_result(uuid, uuid, bigint) from public, anon, authenticated;
 revoke all on function public.add_comment(uuid, text, uuid) from public, anon, authenticated;
 revoke all on function public.remove_comment(uuid) from public, anon, authenticated;
+revoke all on function public.reply_to_comment(uuid, text, uuid) from public, anon, authenticated;
 grant execute on function public.create_idea(text, text, date, text) to authenticated;
 grant execute on function public.update_idea(uuid, bigint, text, text, date, text) to authenticated;
 grant execute on function public.delete_idea(uuid, bigint) to authenticated;
@@ -589,6 +676,7 @@ grant execute on function public.submit_result(uuid, bigint, text, text, text) t
 grant execute on function public.reopen_result(uuid, uuid, bigint) to authenticated;
 grant execute on function public.add_comment(uuid, text, uuid) to authenticated;
 grant execute on function public.remove_comment(uuid) to authenticated;
+grant execute on function public.reply_to_comment(uuid, text, uuid) to authenticated;
 
 -- Supabase Postgres Changes does not apply row-level RLS to DELETE events.
 -- Publish only INSERT/UPDATE. Every participant, comment and deletion change
