@@ -61,8 +61,8 @@ No production Node server, framework, package installation, or build system is r
 - **Discussion:** every idea has a permanent comment section directly under it on the dashboard. There is no popup. It shows a composer with a Markdown/LaTeX preview, the comments with author avatar, relative time and rendered content, oldest- or newest-first sorting, and "Show earlier comments" paging. Realtime updates never erase a draft, including a draft being typed.
 - **Replies:** every comment has **Reply**. The reply box opens inline under that comment, and replies to replies work to any depth. Threads are drawn with indentation and connector lines. Indentation stops after 4 levels (2 on phones); deeper replies show "↪ name" for their real parent. Replies within a thread are always oldest first, and long threads can be collapsed. Comments and replies keep their author, server timestamp and exact original text, and cannot be edited. The active author can **Delete** their own comments and replies; the active PI can **Delete** any of them: a removed comment shows "Comment removed", its replies stay, and it cannot receive new replies. A retried post after a lost network response cannot create a duplicate.
 - **Activity history:** read-only, with before/after snapshots of idea edits, joins, results, reopened results, comments and removals. Deleting an idea records one snapshot containing every participant result and comment. The global Activity history includes deleted ideas.
-- Six live counters, plus a progress bar for the share of ideas with at least one result. Ideas appear as expandable cards in Monday-based weekly groups, listing each participant's status and result.
-- Search by ID (`IDEA-1000`, `idea 1000` or `1000` find exactly that idea, not `IDEA-10000`), title or description; filters for week, status (open / in progress / has results), participant, result (any success / any fail / none) and priority; sorting by **idea number ascending (default)**, idea number descending, newest or oldest. Numbers are compared as integers, so restored ideas with old timestamps still appear in ID order.
+- Six live counters, plus a progress bar for the share of ideas with at least one result. Ideas appear as expandable cards in Monday-based weekly groups, listing each participant's status and result. The two collapsible levels look different: week headers are a slate/blue-gray band; idea headers are neutral, lighter while collapsed and darker while expanded, above the lighter idea content. Both headers are fully clickable, with a rotating caret and hover feedback, and keep their open/closed state across Realtime refreshes.
+- Search by ID (`IDEA-1000`, `idea 1000` or `1000` find exactly that idea, not `IDEA-10000`), title or description; filters for week, status (open / in progress / has results), participant, result (any success / any fail / none) and priority; sorting by **idea number descending (default)**, idea number ascending, newest or oldest. **Clear filters** restores idea number descending. Numbers are compared as integers, so `IDEA-10000` comes before `IDEA-1000` and `IDEA-999` regardless of creation timestamps. Weeks keep their grouping, and ideas within each week follow the selected order.
 - Realtime change subscriptions, burst coalescing, reconnection with backoff, refresh after subscription, foreground/focus refresh, and a 30-second foreground reconciliation poll. Offline/stale indicators and disabled mutations when data cannot be refreshed.
 - Confirmation dialogs, in-flight button disabling, conflict notifications, safe text rendering, keyboard-friendly native controls, responsive dark theme.
 
@@ -627,7 +627,9 @@ Validation performed on **October 18, 2026** (V2, local only):
     - a failure injected after the full V2 install rolls everything back: V1 data identical by fingerprint, no archive, V1 RPCs and publication unchanged
     - the successful upgrade gives an archive identical to the backup; IDEA-001's Markdown, the profiles and the Auth users are unchanged; V1 functions and helpers are gone; the archive is unpublished and unreadable by members; existing members work on V2
     - a rerun is a no-op; archive removal requires confirmation and leaves profiles unchanged
-- **377 JavaScript syntax/DOM integration checks passed** using a simulated transport:
+- **393 JavaScript syntax/DOM integration checks passed** using a simulated transport:
+  - descending default and Clear filters; ascending and descending order within each week; week and idea headers collapse and expand on click, stay that way after a Realtime refresh, and have three distinct header backgrounds
+  - the header tests also caught a bug, now fixed: a refresh between the click and the browser's toggle event could undo the click
   - numeric sorting of 1, 2, 3, 999, 1000 and 10000 with restored older timestamps (both number directions and both date sorts); exact ID search; full four- and five-digit IDs
   - Delete is shown only to the PI or the creator of an untouched idea; explicit confirmation; helpful messages when the server refuses; in-place Markdown correction keeps the number
   - switching to text comparison or loosening the Delete rule makes these tests fail
@@ -718,7 +720,7 @@ Additive and data-preserving. `supabase/migrations/allow_creator_delete_untouche
    The result must be `true`. The current page keeps working: it shows Delete only to the PI, and the PI's deletions behave as before.
 3. **Then deploy the frontend:** commit and `git push origin main`, wait for GitHub Pages, and hard-reload. Deploying the page first would show creators a Delete button that the old database function refuses, with an error message; no data is at risk, but avoid it.
 4. **Verify live** with disposable ideas:
-   - the list is in ID order by default;
+   - the list is in descending ID order by default;
    - a researcher sees Delete only on their own idea while nobody has joined or commented, and deleting it requires confirmation;
    - after someone joins, the button is gone and a direct RPC call is refused;
    - the PI can still delete an idea with contributions, and History shows the full snapshot;

@@ -554,17 +554,64 @@ try {
   const restoredIdeas=[[1000,'Restored idea A','2026-09-01T00:00:00Z'],[10000,'Restored idea B','2026-08-01T00:00:00Z'],[999,'Restored idea C','2026-10-20T00:00:00Z']]
     .map(([n,title,created])=>({...base,id:`idea-n${n}`,idea_number:n,title,created_at:created,updated_at:created}));
   ideas.push(...restoredIdeas);await app.loadIdeas();click('clear-filters');
-  check(d.getElementById('sort').value,'number','default sort is idea number ascending');
-  check([...d.getElementById('sort').options].map(o=>o.value),['number','number-desc','newest','oldest'],'number ↑/↓ plus the existing date sorts');
+  check(d.getElementById('sort').value,'number-desc','default sort is idea number descending');
+  check([...d.getElementById('sort').options].map(o=>[o.value,o.textContent]),[['number-desc','Idea number ↓'],['number','Idea number ↑'],['newest','Newest first'],['oldest','Oldest first']],'number ↓ (default), number ↑ and both date sorts');
+  check([...app.filteredIdeas()].map(i=>i.idea_number),[10000,1000,999,4,3,2,1],'default order is numeric descending regardless of timestamps');
   const orderOf=value=>{setFilter('sort',value);return [...app.filteredIdeas()].map(i=>i.idea_number);};
   check(orderOf('number'),[1,2,3,4,999,1000,10000],'numeric ascending, not lexicographic');
   check(orderOf('number-desc'),[10000,1000,999,4,3,2,1],'numeric descending');
   check(orderOf('newest'),[999,1,2,3,4,1000,10000],'newest first still uses creation time');
   check(orderOf('oldest'),[10000,1000,1,2,3,4,999],'oldest first still uses creation time');
+  setFilter('sort','newest');click('clear-filters');
+  check(d.getElementById('sort').value,'number-desc','Clear filters restores Idea number ↓');
+  const weekNumbers=()=>[...d.querySelectorAll('.week')].map(week=>[week.querySelector('.week-name').textContent,[...week.querySelectorAll('.idea-number')].map(el=>el.textContent)]);
+  check(weekNumbers().map(([,numbers])=>numbers),[['IDEA-10000','IDEA-1000','IDEA-999','IDEA-003','IDEA-002','IDEA-001'],['IDEA-004']],'week grouping kept; numeric descending within each week, full IDs');
+  setFilter('sort','number');
+  check(weekNumbers().map(([,numbers])=>numbers),[['IDEA-001','IDEA-002','IDEA-003','IDEA-999','IDEA-1000','IDEA-10000'],['IDEA-004']],'number ↑ within each week');
   click('clear-filters');
-  check([...d.querySelector('.week').querySelectorAll('.idea-number')].map(el=>el.textContent),['IDEA-001','IDEA-002','IDEA-003','IDEA-999','IDEA-1000','IDEA-10000'],'cards in numeric order with full IDs');
   check([card('IDEA-10000')?.querySelector('.idea-title').textContent,card('IDEA-1000')?.querySelector('.idea-title').textContent],['Restored idea B','Restored idea A'],'four- and five-digit IDs are not truncated');
   await snapshot('numbers.html');
+
+  // ---- Two collapsible levels: slate week headers, neutral idea headers.
+  click('collapse-all');click('expand-all');click('collapse-all');
+  for (const week of d.querySelectorAll('.week')) { week.open=true; week.dispatchEvent(new w.Event('toggle')); }
+  const firstWeek=()=>d.querySelector('.week'), weekHead=()=>firstWeek().querySelector(':scope > summary');
+  const ideaHead=number=>card(number).querySelector(':scope > summary');
+  const style=el=>w.getComputedStyle(el);
+  const weekKey=weekHead().dataset.focusKey.replace('week-','');
+  weekHead().click();
+  await wait(()=>app.state.weekOpen.get(weekKey)===false);
+  check(firstWeek().open,false,'clicking a week header collapses the week');
+  await app.loadIdeas();
+  check(firstWeek().open,false,'collapsed week stays collapsed after a Realtime refresh');
+  weekHead().click();
+  await wait(()=>app.state.weekOpen.get(weekKey)===true);
+  check(firstWeek().open,true,'clicking again expands the week');
+  check(card('IDEA-1000').open,false,'ideas start collapsed');
+  const collapsedIdea=style(ideaHead('IDEA-1000')).backgroundColor;
+  ideaHead('IDEA-1000').click();
+  await wait(()=>app.state.ideaOpen.get('idea-n1000')===true);
+  check(card('IDEA-1000').open,true,'clicking an idea header expands the idea');
+  // jsdom treats the element just clicked as hovered, so measure resting colours on
+  // an idea opened without a click.
+  const restingOpen=card('IDEA-999');restingOpen.open=true;restingOpen.dispatchEvent(new w.Event('toggle'));
+  const expandedIdea=style(ideaHead('IDEA-999')).backgroundColor, weekBackground=style(weekHead()).backgroundColor;
+  check([weekBackground,collapsedIdea,expandedIdea],['rgb(31, 41, 55)','rgb(37, 43, 53)','rgb(19, 23, 28)'],'slate week header; lighter collapsed and darker expanded idea header');
+  check(new Set([weekBackground,collapsedIdea,expandedIdea,style(card('IDEA-1000')).backgroundColor]).size,4,'week header, idea headers and idea content are all distinct');
+  check([style(weekHead()).cursor,style(ideaHead('IDEA-1000')).cursor],['pointer','pointer'],'both headers show a pointer');
+  check([...weekHead().querySelectorAll('.chevron'),...ideaHead('IDEA-1000').querySelectorAll('.chevron')].length,2,'both headers keep a caret');
+  const css=[...d.querySelectorAll('style')].map(el=>el.textContent).join('');
+  check(['.week>summary:hover','.idea>summary:hover','.idea[open]>summary:hover','.week:not([open])>summary .chevron,.idea:not([open])>summary .chevron{transform:rotate(-90deg)}'].every(rule=>css.includes(rule)),true,'hover feedback and rotating carets defined for both levels');
+  await app.loadIdeas();
+  check([card('IDEA-1000').open,style(ideaHead('IDEA-1000')).backgroundColor],[true,'rgb(19, 23, 28)'],'expanded idea stays expanded and dark after a refresh');
+  ideaHead('IDEA-1000').click();
+  await wait(()=>app.state.ideaOpen.get('idea-n1000')===false);
+  await app.loadIdeas();
+  check([card('IDEA-1000').open,style(ideaHead('IDEA-1000')).backgroundColor],[false,collapsedIdea],'collapsing restores the lighter header');
+  check(style(ideaHead('IDEA-1000')).backgroundColor!==style(weekHead()).backgroundColor,true,'idea header stays distinct from the week header');
+  ideaHead('IDEA-10000').click();await wait(()=>card('IDEA-10000').open);
+  await snapshot('headers.html');
+  ideaHead('IDEA-10000').click();await wait(()=>!card('IDEA-10000').open);
   for (const [query,expected] of [['IDEA-1000',[1000]],['idea-10000',[10000]],['1000',[1000]],['IDEA-001',[1]],['IDEA-1',[1]],['idea 999',[999]]]) {
     setFilter('search',query);check([...app.filteredIdeas()].map(i=>i.idea_number),expected,`search ${query} finds the exact number`);
   }
