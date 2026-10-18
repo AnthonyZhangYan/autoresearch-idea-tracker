@@ -152,7 +152,7 @@ installMarkdownLibraries(w);
 w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
 w.HTMLDialogElement.prototype.close=function(){this.open=false;};
 w.supabase={createClient:()=>client};
-w.eval(script+'\nwindow.__app = {state,loadIdeas,loadCurrentUser,renderDashboard,openIdeaDialog,openResultDialog,confirmAction,joinIdea,mutate,openHistory,openDiscussion,safeURL,closeModal,filteredIdeas,renderMarkdown,suggestedMarkdownTitle,readMarkdownFile};');
+w.eval(script+'\nwindow.__app = {state,loadIdeas,loadCurrentUser,renderDashboard,openIdeaDialog,openResultDialog,confirmAction,joinIdea,mutate,openHistory,safeURL,closeModal,filteredIdeas,renderMarkdown,suggestedMarkdownTitle,readMarkdownFile};');
 const app=w.__app;
 const wait=async condition=>{for(let n=0;n<200;n++){if(condition())return;await new Promise(resolve=>setTimeout(resolve,5));}throw Error('Timed out waiting for DOM test condition');};
 const click = id => d.getElementById(id).click();
@@ -221,14 +221,14 @@ try {
   // ---- Independent participants on one idea.
   await app.loadIdeas();
   let c3 = card('IDEA-003');
-  check(c3.querySelector('.summary-assignee').textContent,'Yan, Junqi','participants summarized on the card');
+  check(c3.querySelector('.summary-assignee').textContent,'Yan, Junqi · 1 comment','participants and comment count summarized on the card');
   check([...c3.querySelectorAll('.summary-badges .badge')].map(b=>b.textContent),['1 success','1 fail'],'aggregated badges');
   check([...c3.querySelectorAll('.participant')].map(li=>[li.querySelector('.participant-name').textContent,[...li.querySelectorAll('.badge')].map(b=>b.textContent).join('/')]),
     [['Yan','Completed/Success'],['Junqi','Completed/Fail']],'each participant shows their own status and result');
   check(c3.textContent.includes('Synthetic failed trial'),true,'participant notes shown');
   check(c3.querySelector('.participant a[href]').getAttribute('rel'),'noopener noreferrer','safe experiment link');
   check(labels(c3).filter(l=>l==='Reopen result').length,2,'PI can reopen each result');
-  check(labels(c3).includes('Discussion (1)'),true,'comment count on card');
+  check(c3.querySelector('.discussion-head h3').textContent,'Discussion (1)','comment count on card');
   check([...card('IDEA-001').querySelectorAll('.summary-badges .badge')].map(b=>b.textContent),['Open'],'idea without participants is open');
   check(card('IDEA-001').querySelector('.summary-assignee').textContent,'No participants','empty participant summary');
   check(card('IDEA-002').textContent.includes('Published by'),true,'creator shown');
@@ -310,47 +310,94 @@ try {
     check(text('modal-body').includes(phrase),true,`history shows: ${phrase}`);
   app.closeModal();
 
-  // ---- Discussion: Markdown/LaTeX, validation, idempotent retry, removal.
-  app.openDiscussion(ideaById('idea-3'));
-  await wait(()=>d.querySelectorAll('.comment').length===1);
-  check(text('modal-title'),'IDEA-003 · Discussion','discussion dialog');
-  const first=d.querySelector('.comment');
-  check([first.querySelector('.comment-head strong').textContent,first.querySelector('.markdown-body strong')?.textContent,!!first.querySelector('.katex')],['Junqi','synthetic',true],'comment renders author, Markdown and math');
-  const composer=d.querySelector('.comment-composer textarea');
-  const type=value=>{composer.value=value;composer.dispatchEvent(new w.Event('input'));};
+  // ---- Inline discussion under each idea: no modal, Markdown/LaTeX, drafts, paging.
+  const thread = number => card(number).querySelector('[data-slot="thread"]');
+  const composerOf = number => card(number).querySelector('.comment-input');
+  const postIn = number => card(number).querySelector('.composer').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+  const composerError = number => card(number).querySelector('.composer .error-text').textContent;
+  const type = (number,value) => { const input=composerOf(number); input.value=value; input.dispatchEvent(new w.Event('input')); };
+  const openCard = number => { const el=card(number); if (!el.open) { el.open=true; el.dispatchEvent(new w.Event('toggle')); } };
+  check([...d.querySelectorAll('.idea')].every(el=>el.querySelector('.discussion .composer .comment-input')),true,'every idea card has an inline composer');
+  check(card('IDEA-003').querySelector('.discussion-head h3').textContent,'Discussion (1)','discussion heading shows the count');
+  check(card('IDEA-003').querySelector('.idea-meta').textContent.includes('1 comment'),true,'comment count in the card meta row');
+  openCard('IDEA-003');
+  await wait(()=>thread('IDEA-003').querySelector('.comment'));
+  const first=thread('IDEA-003').querySelector('.comment');
+  check([first.querySelector('.comment-head strong').textContent,first.querySelector('.comment-avatar').textContent,first.querySelector('.markdown-body strong')?.textContent,!!first.querySelector('.katex')],
+    ['Junqi','J','synthetic',true],'comment shows author, avatar, Markdown and math inline');
+  const stamp=first.querySelector('time');
+  check([stamp.dateTime,stamp.title.length>0,stamp.textContent.length>0],['2026-10-13T16:00:00Z',true,true],'relative time with exact timestamp');
+  check(d.getElementById('modal').open,false,'reading comments needs no dialog');
   const callsBeforeComment=calls.length;
-  submit();check(d.querySelector('.comment-composer .error-text').textContent,'Write a comment before posting.','empty comment rejected');
-  type('x'.repeat(20481));submit();check(d.querySelector('.comment-composer .error-text').textContent.includes('20 KiB'),true,'oversized comment rejected');
+  postIn('IDEA-003');check(composerError('IDEA-003'),'Write a comment before posting.','empty comment rejected');
+  type('IDEA-003','x'.repeat(20481));postIn('IDEA-003');check(composerError('IDEA-003').includes('20 KiB'),true,'oversized comment rejected');
   check(calls.length,callsBeforeComment,'invalid comments make no RPC');
   const commentText='## Proposal\n\n$$\\alpha_i$$ <img src=x onerror=alert(1)> [x](javascript:alert(1))';
-  type(commentText);
-  await wait(()=>d.querySelector('.comment-composer .markdown-preview h2'));
-  check(!!d.querySelector('.comment-composer .markdown-preview .katex'),true,'live comment preview renders math');
-  loseNextResponse=true;submit();await settled();
+  type('IDEA-003',commentText);
+  press(card('IDEA-003').querySelector('.composer'),'Preview');
+  await wait(()=>card('IDEA-003').querySelector('.composer .markdown-preview h2'));
+  check([!!card('IDEA-003').querySelector('.composer .markdown-preview .katex'),card('IDEA-003').querySelector('.composer .markdown-preview').hidden],[true,false],'composer preview renders math');
+  loseNextResponse=true;postIn('IDEA-003');await settled();
   const firstAttempt=calls.at(-1).args;
-  check(composer.value,commentText,'draft kept after an uncertain failure');
+  check([calls.at(-1).name,composerOf('IDEA-003').value],['add_comment',commentText],'draft kept after an uncertain failure');
   check(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(firstAttempt.p_client_request_id),true,'request ID is a UUID');
-  submit();await settled();
+  postIn('IDEA-003');await settled();
   check(calls.at(-1).args.p_client_request_id,firstAttempt.p_client_request_id,'retry reuses the request ID');
   check(comments.filter(c=>c.body===commentText).length,1,'lost response plus retry posts once');
-  check([d.getElementById('modal').open,composer.value],[true,''],'dialog stays open and draft clears after posting');
-  await wait(()=>d.querySelectorAll('.comment').length===2);
-  const posted=[...d.querySelectorAll('.comment')].at(-1);
-  check([!!posted.querySelector('h2'),!!posted.querySelector('.katex')],[true,true],'posted comment rendered');
+  check([composerOf('IDEA-003').value,d.getElementById('modal').open],['',false],'composer clears after posting, without any dialog');
+  await wait(()=>thread('IDEA-003').querySelectorAll('.comment').length===2);
+  const posted=[...thread('IDEA-003').querySelectorAll('.comment')].at(-1);
+  check([posted.querySelector('.comment-head strong').textContent,!!posted.querySelector('h2'),!!posted.querySelector('.katex')],['Shibo',true,true],'new comment appears at the end of the thread');
   check(posted.querySelector('img,script,[onerror],a[href^="javascript"]'),null,'comment XSS inert');
-  type('Second draft');
-  check(app.state.discussion.requestId!==firstAttempt.p_client_request_id,true,'a new draft gets a new request ID');
+  check(card('IDEA-003').querySelector('.discussion-head h3').textContent,'Discussion (2)','count updated');
+
+  // Realtime while typing: new comments appear, the focused draft is untouched.
+  type('IDEA-003','Draft in progress');
+  const typing=composerOf('IDEA-003');typing.focus();typing.setSelectionRange(5,5);
+  const requestBeforeRefresh=app.state.commentDrafts.get('idea-3').requestId;
+  currentId='member-1';await client.rpc('add_comment',{p_idea_id:'idea-3',p_body:'Remote reply while typing',p_client_request_id:'00000000-0000-4000-8000-000000000042'});currentId='member-0';
   await app.loadIdeas();
-  check([composer.isConnected,composer.value],[true,'Second draft'],'Realtime refresh keeps the draft');
+  check([composerOf('IDEA-003')===typing,typing.value,d.activeElement===typing,typing.selectionStart],[true,'Draft in progress',true,5],'refresh keeps the same textarea, text, focus and caret');
+  check(thread('IDEA-003').textContent.includes('Remote reply while typing'),true,'remote comment appears while typing');
+  check(card('IDEA-003').querySelector('.discussion-head h3').textContent,'Discussion (3)','count updates while typing');
+  check(app.state.renderPending,true,'structural rebuild deferred while typing');
+  typing.blur();
+  await app.loadIdeas();
+  check([composerOf('IDEA-003')!==typing,composerOf('IDEA-003').value,app.state.commentDrafts.get('idea-3').requestId],[true,'Draft in progress',requestBeforeRefresh],'rebuilt card restores the draft and its request ID');
+  type('IDEA-003','');
+
+  // Sorting and "Load more".
+  for (let n=0;n<22;n++) comments.push({id:`bulk-${String(n).padStart(2,'0')}`,idea_id:'idea-2',author_id:`member-${n%4}`,body:`Bulk comment ${n}`,
+    client_request_id:`00000000-0000-4000-8000-0000000001${String(n).padStart(2,'0')}`,created_at:`2026-10-14T10:${String(n).padStart(2,'0')}:00Z`,removed_at:null,removed_by:null});
+  await app.loadIdeas();openCard('IDEA-002');
+  const bodies=()=>[...thread('IDEA-002').querySelectorAll('.comment .markdown-body')].map(el=>el.textContent.trim());
+  await wait(()=>bodies().length===10);
+  check([bodies()[0],bodies().at(-1)],['Bulk comment 12','Bulk comment 21'],'oldest-first shows the latest page chronologically');
+  check(thread('IDEA-002').firstChild.textContent,'Show 10 earlier comments','load earlier control above the thread');
+  thread('IDEA-002').firstChild.click();
+  check(bodies().length,20,'second page loaded');
+  thread('IDEA-002').firstChild.click();
+  check([bodies().length,bodies()[0],thread('IDEA-002').querySelector('.more-comments')],[22,'Bulk comment 0',null],'all comments loaded; control removed');
+  const sort=card('IDEA-002').querySelector('.discussion-head select');sort.value='newest';sort.dispatchEvent(new w.Event('change'));
+  check([bodies()[0],bodies().at(-1)],['Bulk comment 21','Bulk comment 0'],'newest-first ordering');
+  check(card('IDEA-002').querySelector('.discussion-head h3').textContent,'Discussion (22)','count with many comments');
+
+  // PI removal inline; researchers see no Remove control.
   w.confirm=()=>true;
-  press(d.querySelector('.comment'),'Remove');
-  await wait(()=>d.querySelector('.comment.removed'));await settled();
-  check(calls.at(-1),{name:'remove_comment',args:{p_comment_id:'comment-1'}},'PI removes a comment');
-  check(d.querySelector('.comment.removed').textContent.includes('Comment removed by Shibo'),true,'removed comment placeholder');
-  check(d.querySelector('.comment.removed .markdown-body'),null,'removed body hidden in UI');
-  check(labels(card('IDEA-003')).includes('Discussion (1)'),true,'card count excludes removed comment');
+  press(thread('IDEA-003').querySelector('.comment'),'Remove');
+  await wait(()=>thread('IDEA-003').querySelector('.comment.removed'));await settled();
+  check(calls.at(-1),{name:'remove_comment',args:{p_comment_id:'comment-1'}},'PI removes a comment inline');
+  check(thread('IDEA-003').querySelector('.comment.removed').textContent.includes('Comment removed by Shibo'),true,'removed comment placeholder');
+  check(thread('IDEA-003').querySelector('.comment.removed .markdown-body'),null,'removed body hidden in UI');
+  check(card('IDEA-003').querySelector('.discussion-head h3').textContent,'Discussion (2)','count excludes removed comment');
+  click('expand-all');
   await snapshot('discussion.html');
-  app.closeModal();
+  click('collapse-all');
+  currentId='member-1';await app.loadCurrentUser(session());await settled();
+  openCard('IDEA-003');await wait(()=>thread('IDEA-003').querySelector('.comment'));
+  check(labels(thread('IDEA-003')).includes('Remove'),false,'researchers cannot remove comments');
+  check(app.state.commentDrafts.size,0,'drafts never carry over to another account');
+  currentId='member-0';await app.loadCurrentUser(session());await settled();
 
   // ---- Conflicts, refresh coalescing, stale and offline states.
   rpcError={message:'Already participating in this idea'};
