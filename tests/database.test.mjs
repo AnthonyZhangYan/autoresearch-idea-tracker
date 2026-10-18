@@ -32,9 +32,9 @@ try {
   await db.initialise(); await db.start();
   const admin = db.getPgClient(); await admin.connect(); clients.push(admin);
   await admin.query(`create role anon nologin; create role authenticated nologin; ${authStub}`);
-  const [schema, exportSQL, dropArchiveSQL, v1Schema, repliesMigration, v20Schema, authorDeleteMigration] = await Promise.all([read('../supabase/schema.sql'),read('../supabase/export_v1_backup.sql'),
-    read('../supabase/drop_v1_archive.sql'),read('./fixtures/schema_v1.sql'),read('../supabase/migrations/add_comment_replies.sql'),read('./fixtures/schema_v2_0.sql'),read('../supabase/migrations/allow_comment_author_delete.sql')]);
-  for (const [name,sql] of [['schema.sql',schema],['export',exportSQL],['archive cleanup',dropArchiveSQL],['replies migration',repliesMigration],['author deletion migration',authorDeleteMigration]]) {
+  const [schema, exportSQL, dropArchiveSQL, v1Schema, repliesMigration, v20Schema, creatorDeleteMigration, authorDeleteMigration] = await Promise.all([read('../supabase/schema.sql'),read('../supabase/export_v1_backup.sql'),
+    read('../supabase/drop_v1_archive.sql'),read('./fixtures/schema_v1.sql'),read('../supabase/migrations/add_comment_replies.sql'),read('./fixtures/schema_v2_0.sql'),read('../supabase/migrations/allow_creator_delete_untouched_idea.sql'),read('../supabase/migrations/allow_comment_author_delete.sql')]);
+  for (const [name,sql] of [['schema.sql',schema],['export',exportSQL],['archive cleanup',dropArchiveSQL],['replies migration',repliesMigration],['author deletion migration',authorDeleteMigration],['creator deletion migration',creatorDeleteMigration]]) {
     check(/```|\\[_*<>]|&(?:lt|gt);/.test(sql),false,`${name} is plain SQL, not escaped Markdown`);
     check(/\bcascade\b/i.test(sql.replace(/--.*$/gm,'')),false,`${name} uses no CASCADE`);
   }
@@ -100,7 +100,7 @@ try {
   const piEdited = await rpc(shibo,'update_idea',[yanIdea.id,edited.revision,'PI edited','Admin edit','2026-10-19','medium']);
   check(piEdited.title,'PI edited','PI edits any idea');
   await rejects(() => rpc(yan,'update_idea',[yanIdea.id,edited.revision,'Stale','','2026-10-12','low']),/Idea changed/,'stale edit rejected');
-  await rejects(() => rpc(yan,'delete_idea',[yanIdea.id,piEdited.revision]),/Permission denied/,'creator cannot delete (PI only)');
+  await rejects(() => rpc(junqi,'delete_idea',[yanIdea.id,piEdited.revision]),/only the PI or the idea creator/,'researcher cannot delete another member\'s idea');
   await rejects(() => rpc(shibo,'create_idea',['Bad Monday','','2026-10-13','low']),/check constraint/,'Monday constraint');
   await rejects(() => create(shibo,'   '),/check constraint/,'blank title');
   await rejects(() => rpc(shibo,'create_idea',['Bad priority','','2026-10-12','urgent']),/check constraint/,'priority constraint');
@@ -336,6 +336,71 @@ try {
   for (const observer of [shibo,yan]) check((await observer.query('select * from public.idea_events where idea_id=$1',[target])).rowCount > 0,true,'history readable after deletion');
   const next = await create(shibo);
   check(Number(next.idea_number) > Number(streamIdea.idea_number),true,'idea numbers never reused');
+
+  // ---- Deleting ideas: the PI any idea; the creator only an untouched one.
+  const emptyOwn = await create(yan,'Yan empty idea');
+  await rejects(() => rpc(junqi,'delete_idea',[emptyOwn.id,emptyOwn.revision]),/only the PI or the idea creator/,'another researcher cannot delete it');
+  await rejects(() => rpc(outsider,'delete_idea',[emptyOwn.id,emptyOwn.revision]),/Permission denied/,'outsider cannot delete it');
+  await rpc(yan,'delete_idea',[emptyOwn.id,emptyOwn.revision]);
+  const ownDeleted = (await events(emptyOwn.id)).at(-1);
+  check([await idea(emptyOwn.id),ownDeleted.event_type,ownDeleted.actor_id,ownDeleted.previous_state.title,ownDeleted.previous_state.participants,ownDeleted.previous_state.comments],
+    [undefined,'deleted',users.Yan,'Yan empty idea',[],[]],'creator deletes an untouched idea; deletion audited');
+  for (const [label,contribute] of [
+    ['a participant',async id => { await rpc(junqi,'join_idea',[id]); }],
+    ['a withdrawn participant',async id => { const row = await rpc(junqi,'join_idea',[id]); await rpc(junqi,'leave_idea',[id,row.revision]); }],
+    ['the creator\'s own result',async id => { const row = await rpc(yan,'join_idea',[id]); await rpc(yan,'submit_result',[id,row.revision,'fail',null,null]); }],
+    ['a comment',async id => { await rpc(junqi,'add_comment',[id,'Feedback',randomUUID()]); }],
+    ['a removed comment',async id => { const comment = await rpc(yan,'add_comment',[id,'Own note',randomUUID()]); await rpc(yan,'remove_comment',[comment.id]); }]]) {
+    const own = await create(yan,`Yan idea with ${label}`);
+    await contribute(own.id);
+    const revision = (await idea(own.id)).revision;
+    await rejects(() => rpc(yan,'delete_idea',[own.id,revision]),/already has participants or comments; only the PI can delete it/,`creator cannot delete an idea with ${label}`);
+    check((await idea(own.id))?.title,`Yan idea with ${label}`,`idea with ${label} kept`);
+  }
+  // The PI deletes an idea with contributions; the audit snapshot is complete.
+  const rich = await create(yan,'Yan idea with contributions');
+  const richJoin = await rpc(junqi,'join_idea',[rich.id]);
+  await rpc(junqi,'submit_result',[rich.id,richJoin.revision,'success','Rich result','https://example.org/rich']);
+  const richComment = await rpc(yifan,'add_comment',[rich.id,'Rich comment',randomUUID()]);
+  await rpc(yan,'reply_to_comment',[richComment.id,'Rich reply',randomUUID()]);
+  const richHistoryBefore = (await events(rich.id)).length;
+  await rpc(shibo,'delete_idea',[rich.id,(await idea(rich.id)).revision]);
+  const richEvents = await events(rich.id), richSnapshot = richEvents.at(-1).previous_state;
+  check([richEvents.length,richEvents.at(-1).actor_id],[richHistoryBefore + 1,users.Shibo],'earlier history kept, deletion appended');
+  check([richSnapshot.created_by,richSnapshot.participants.map(p => [p.member_id,p.result,p.notes,p.experiment_url]),richSnapshot.comments.map(c => [c.body,c.parent_comment_id === richComment.id])],
+    [users.Yan,[[users.Junqi,'success','Rich result','https://example.org/rich']],[['Rich comment',false],['Rich reply',true]]],'PI deletion snapshot keeps results, comments and replies');
+  check((await admin.query('select (select count(*) from public.idea_participants where idea_id=$1)::int p, (select count(*) from public.idea_comments where idea_id=$1)::int c',[rich.id])).rows[0],{p:0,c:0},'no orphaned participants, results or comments');
+  // Creator deletion racing a join or comment, in both orders.
+  for (const [label,contribute] of [['join',id => rpc(junqi,'join_idea',[id])],['comment',id => rpc(junqi,'add_comment',[id,'Racing comment',randomUUID()])]]) {
+    const first = await create(yan,`Race: ${label} first`);
+    await junqi.query('begin');
+    await contribute(first.id);
+    const refused = rpc(yan,'delete_idea',[first.id,first.revision]).then(value => ({value}),error => ({error}));
+    check(await settlesWithin(refused,300),'pending',`${label} first: the creator's deletion waits`);
+    await junqi.query('commit');
+    check((await refused).error?.message,'Permission denied: this idea already has participants or comments; only the PI can delete it',`${label} first: deletion refused once it commits`);
+    check((await idea(first.id))?.id,first.id,`${label} first: idea kept`);
+    const second = await create(yan,`Race: deletion before ${label}`);
+    await yan.query('begin');
+    await rpc(yan,'delete_idea',[second.id,second.revision]);
+    const late = contribute(second.id).then(value => ({value}),error => ({error}));
+    check(await settlesWithin(late,300),'pending',`deletion first: the ${label} waits`);
+    await yan.query('commit');
+    check((await late).error?.message,'Idea not found',`deletion first: the ${label} is rejected`);
+    check((await admin.query('select (select count(*) from public.idea_participants where idea_id=$1)::int p, (select count(*) from public.idea_comments where idea_id=$1)::int c',[second.id])).rows[0],{p:0,c:0},`deletion first: no orphaned ${label}`);
+  }
+  // Correcting a broken Markdown upload keeps the idea, its number and its history.
+  const broken = await rpc(yan,'create_idea',['Truncated upload','# Truncated\n\n| a | b |\n|---','2026-10-12','high']);
+  const corrected = await rpc(yan,'update_idea',[broken.id,broken.revision,'Corrected upload','# Corrected\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n$x^2$','2026-10-12','high']);
+  check([corrected.id,corrected.idea_number,corrected.created_by,corrected.created_at,corrected.revision],[broken.id,broken.idea_number,users.Yan,broken.created_at,'2'],'editing keeps the identifier, number, creator and creation time');
+  const correction = (await events(broken.id)).at(-1);
+  check([correction.event_type,correction.previous_state.description,Number(correction.new_state.idea_number)],['edited','# Truncated\n\n| a | b |\n|---',Number(broken.idea_number)],'history keeps the incomplete Markdown');
+  // Idea numbers beyond 999 are plain bigints: numeric order, no truncation.
+  for (const n of [999,1000,10000]) await admin.query("insert into public.ideas(idea_number,title,week_start,created_by) overriding system value values ($1,$2,'2026-10-12',$3)",[n,`Number ${n}`,users.Shibo]);
+  check((await yan.query("select idea_number from public.ideas where title like 'Number %' order by idea_number")).rows.map(r => r.idea_number),['999','1000','10000'],'numeric order beyond 999');
+  const big = (await admin.query('select * from public.ideas where idea_number=10000')).rows[0];
+  await rpc(junqi,'join_idea',[big.id]);
+  check((await events(big.id)).map(e => [e.event_type,e.idea_number]),[['created','10000'],['joined','10000']],'five-digit ideas work end to end');
 
   // ---- Parent-before-child lock order: deletion vs. every child change, in both orders.
   // child first: the deletion must wait, then snapshot the committed change.
@@ -604,6 +669,19 @@ try {
     from pg_class where oid='public.idea_comments'::regclass`)).rows[0],{rls:true,u:false,d:false,i:false,a:false},'migration does not open direct writes or anonymous reads');
   await live.query(authorDeleteMigration);
   check(await dataSnapshot(),beforeAuthorMigration,'repeating author migration preserves all data');
+  // ---- Creator-delete migration on the deployed schema + both earlier migrations.
+  const liveOwn = await create(liveYan,'Live untouched idea by Yan');
+  await rejects(() => rpc(liveYan,'delete_idea',[liveOwn.id,liveOwn.revision]),/Permission denied/,'deployed RPC: creators cannot delete yet');
+  const beforeCreatorMigration = await dataSnapshot(), deleteDefinition = async () => (await live.query("select md5(pg_get_functiondef('public.delete_idea(uuid,bigint)'::regprocedure)) d")).rows[0].d;
+  const oldDeleteDefinition = await deleteDefinition();
+  await rejects(() => live.query(creatorDeleteMigration.replace(/commit;\s*$/i,()=>"do $$ begin raise exception 'Injected migration failure'; end; $$; commit;")),/Injected migration failure/,'creator migration is transactional');
+  await live.query('rollback');
+  check([await deleteDefinition(),await dataSnapshot()],[oldDeleteDefinition,beforeCreatorMigration],'failed creator migration restores the old function and changes no data');
+  await live.query(creatorDeleteMigration);
+  check(await dataSnapshot(),beforeCreatorMigration,'creator migration preserves every row, result, comment and event');
+  check(await policySnapshot(),beforePolicies,'RLS policies unchanged by the creator migration');
+  await live.query(creatorDeleteMigration);
+  check(await dataSnapshot(),beforeCreatorMigration,'repeating the creator migration preserves all data');
   check(await commentCatalog(live),await commentCatalog(admin),'migrated and freshly installed comment schemas are identical');
   await rejects(() => rpc(liveJunqi,'remove_comment',[liveComment.id]),/Permission denied/,'migrated RPC rejects other authors');
   const liveDeleted = await rpc(liveYan,'remove_comment',[liveComment.id]);
@@ -618,6 +696,15 @@ try {
   check(await dataSnapshot(),afterAuthorDeletes,'rerun preserves removals and history');
   await live.query(schema);
   check(await dataSnapshot(),afterAuthorDeletes,'running the full schema.sql afterwards changes nothing');
+  // Behaviour after the creator migration, on pre-existing data.
+  const liveOwnRevision = (await live.query('select revision from public.ideas where id=$1',[liveOwn.id])).rows[0].revision;
+  await rejects(() => rpc(liveJunqi,'delete_idea',[liveOwn.id,liveOwnRevision]),/only the PI or the idea creator/,'migrated RPC: others cannot delete');
+  await rpc(liveYan,'delete_idea',[liveOwn.id,liveOwnRevision]);
+  check((await live.query('select count(*)::int n from public.ideas where id=$1',[liveOwn.id])).rows[0].n,0,'migrated RPC: creator deletes an untouched idea');
+  const liveIdeaRevision = (await live.query('select revision from public.ideas where id=$1',[liveIdea.id])).rows[0].revision;
+  await rpc(liveShibo,'delete_idea',[liveIdea.id,liveIdeaRevision]);
+  const liveSnapshot = (await live.query("select previous_state from public.idea_events where idea_id=$1 and event_type='deleted'",[liveIdea.id])).rows[0].previous_state;
+  check([liveSnapshot.participants.length,liveSnapshot.comments.length >= 4,liveSnapshot.comments.some(c => c.parent_comment_id)],[2,true,true],'migrated PI deletion snapshots pre-existing results, comments and replies');
   await admin.query('create database not_v2');
   const notV2 = db.getPgClient('not_v2'); await notV2.connect(); clients.push(notV2);
   await notV2.query(authStub);
@@ -625,8 +712,10 @@ try {
   await notV2.query('rollback');
   await rejects(() => notV2.query(authorDeleteMigration),/requires the V2 schema/,'author migration refuses a missing V2 schema');
   await notV2.query('rollback');
+  await rejects(() => notV2.query(creatorDeleteMigration),/requires the V2 schema/,'creator migration refuses a missing V2 schema');
+  await notV2.query('rollback');
 
-  console.log(`PASS: ${checks} PostgreSQL checks, including threaded replies and their additive migration, concurrent participation, parallel independent results, comment idempotency, publication WAL filtering, parent-before-child deletion races, and the backup-verified single-transaction V1 upgrade. Hosted Supabase was not used.`);
+  console.log(`PASS: ${checks} PostgreSQL checks, including creator/PI idea deletion rules and their migration, threaded replies and their additive migration, concurrent participation, parallel independent results, comment idempotency, publication WAL filtering, parent-before-child deletion races, and the backup-verified single-transaction V1 upgrade. Hosted Supabase was not used.`);
 } finally {
   await Promise.allSettled(clients.map(client => client.end()));
   await db.stop(); await rm(directory,{recursive:true,force:true});

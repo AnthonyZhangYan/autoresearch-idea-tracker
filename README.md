@@ -43,6 +43,7 @@ GitHub Pages: index.html (HTML + CSS + vanilla JavaScript)
 | `tests/fixtures/schema_v1.sql` | Frozen V1 schema, used only to test the replacement script |
 | `supabase/migrations/add_comment_replies.sql` | Additive, transactional migration that adds threaded comment replies to an existing V2 database (section 9) |
 | `supabase/migrations/allow_comment_author_delete.sql` | Incremental, transactional RPC migration allowing authors to soft-delete their own comments/replies while retaining PI moderation (section 9B) |
+| `supabase/migrations/allow_creator_delete_untouched_idea.sql` | Transactional RPC migration allowing an idea's creator to delete it while nobody has joined or commented (section 9C) |
 | `tests/fixtures/schema_v2_0.sql` | Frozen copy of the deployed V2 schema before replies, used only to test that migration |
 | `tests/frontend.test.mjs` | Syntax and DOM integration tests using a simulated transport |
 | `tests/invitation.test.mjs` | Invitation callback, password setup, login/logout, and allowlist tests with a simulated Auth client and the actual pinned SDK answered by local fetch responses |
@@ -54,14 +55,14 @@ No production Node server, framework, package installation, or build system is r
 
 - Individual login/logout, restored sessions, explicit allowlist lookup, PI-aware controls.
 - Invitation onboarding: a member opens the Supabase invitation email, lands on **Set Your Password**, chooses their own password through `supabase.auth.updateUser`, and then enters the tracker only if their profile is active. The administrator never sees or assigns member passwords. See section 2.
-- **Ideas:** any active member publishes ideas (Markdown import/editing with live preview). The idea's creator and the PI can edit it; only the PI can delete it. Database-generated `IDEA-001` identifiers are never reused. Sequence gaps are normal after rolled-back transactions or deletion.
+- **Ideas:** any active member publishes ideas (Markdown import/editing with live preview). The idea's creator and the PI can edit it, including fixing an incomplete Markdown upload without losing its number or history. The PI can delete any idea. Its creator can delete it only while nobody has joined it (even someone who later left) and no comment exists (even a deleted one). Database-generated identifiers are shown with at least three digits and never truncated (`IDEA-001`, `IDEA-999`, `IDEA-1000`, `IDEA-10000`) and are never reused. Sequence gaps are normal after rolled-back transactions or deletion.
 - **Participation:** any member can **Join** an idea; several members can test the same idea at once. Each participant has their own row and status (`testing`, `completed`, or `withdrawn`). They can **Leave** while testing and rejoin later.
 - **Independent results:** **Submit my result** records the caller's own Success/Fail, notes and HTTP(S) experiment URL. The database function has no member argument, so no one, including the PI, can write a result into another member's row. A submitted result is final for that member. The PI can **Reopen result** for one member, which returns only that member to Testing; the previous result stays in history.
 - **Discussion:** every idea has a permanent comment section directly under it on the dashboard. There is no popup. It shows a composer with a Markdown/LaTeX preview, the comments with author avatar, relative time and rendered content, oldest- or newest-first sorting, and "Show earlier comments" paging. Realtime updates never erase a draft, including a draft being typed.
 - **Replies:** every comment has **Reply**. The reply box opens inline under that comment, and replies to replies work to any depth. Threads are drawn with indentation and connector lines. Indentation stops after 4 levels (2 on phones); deeper replies show "↪ name" for their real parent. Replies within a thread are always oldest first, and long threads can be collapsed. Comments and replies keep their author, server timestamp and exact original text, and cannot be edited. The active author can **Delete** their own comments and replies; the active PI can **Delete** any of them: a removed comment shows "Comment removed", its replies stay, and it cannot receive new replies. A retried post after a lost network response cannot create a duplicate.
 - **Activity history:** read-only, with before/after snapshots of idea edits, joins, results, reopened results, comments and removals. Deleting an idea records one snapshot containing every participant result and comment. The global Activity history includes deleted ideas.
 - Six live counters, plus a progress bar for the share of ideas with at least one result. Ideas appear as expandable cards in Monday-based weekly groups, listing each participant's status and result.
-- Search by number/title/description; filters for week, status (open / in progress / has results), participant, result (any success / any fail / none) and priority; newest/oldest/number sorting within weekly groups.
+- Search by ID (`IDEA-1000`, `idea 1000` or `1000` find exactly that idea, not `IDEA-10000`), title or description; filters for week, status (open / in progress / has results), participant, result (any success / any fail / none) and priority; sorting by **idea number ascending (default)**, idea number descending, newest or oldest. Numbers are compared as integers, so restored ideas with old timestamps still appear in ID order.
 - Realtime change subscriptions, burst coalescing, reconnection with backoff, refresh after subscription, foreground/focus refresh, and a 30-second foreground reconciliation poll. Offline/stale indicators and disabled mutations when data cannot be refreshed.
 - Confirmation dialogs, in-flight button disabling, conflict notifications, safe text rendering, keyboard-friendly native controls, responsive dark theme.
 
@@ -584,7 +585,7 @@ If port 55439 is occupied, set `TRACKER_TEST_PORT` to another free port. You can
 
 Validation performed on **October 18, 2026** (V2, local only):
 
-- **293 PostgreSQL checks passed** on a temporary local cluster, using the actual `schema.sql`, replies and author-delete migrations, export query, archive cleanup script and backup verifier:
+- **337 PostgreSQL checks passed** on a temporary local cluster, using the actual `schema.sql`, replies, author-delete and creator-delete migrations, export query, archive cleanup script and backup verifier:
   - author deletion on top-level comments and nested replies; PI moderation; anonymous, inactive author/PI, nonmember and other-author denial; direct writes and physical deletion denied; full audit snapshots and unchanged descendants
   - concurrent author/PI deletion produces one removal and one audit event; author deletion and idea deletion serialize in both orders
   - the incremental author-delete migration preserves all rows and parent links, grants and SELECT-only RLS; reruns preserve removals/history; injected failure rolls back the RPC and ACL; the migrated and fresh-install definitions match
@@ -603,7 +604,16 @@ Validation performed on **October 18, 2026** (V2, local only):
   - temporarily removing the reply lock or editing the migration's copy of a function makes these tests fail
   - fresh install and rerun; RLS, grants, `security definer` and fixed `search_path` on all ten RPCs; no V1 columns or RPCs; no cascading foreign keys and no `CASCADE` in any SQL file
   - member-only reads; anonymous, outsider and deactivated-member denial; direct table writes, sequences and private helpers denied
-  - all members create; creator-or-PI edit; PI-only delete
+  - all members create; creator-or-PI edit; deletion rules (October 18, 2026):
+    - the PI deletes any idea, with a complete snapshot of results, comments and replies, and no orphans
+    - a creator deletes an untouched idea and that deletion is audited
+    - a creator is refused once there is a participant, a withdrawn participant, their own result, a comment or a deleted comment
+    - other researchers and outsiders are refused
+    - a creator's deletion racing a join or comment, in both orders, never loses or orphans the contribution
+    - fixing truncated Markdown keeps the id, number, creator and creation time, with the old text in history
+    - idea numbers 999, 1000 and 10000 order numerically and work end to end
+    - the migration on the deployed schema plus both earlier migrations is transactional, repeatable, keeps all data and RLS, and matches a fresh install
+    - removing the contribution check from either SQL file makes the tests fail
   - **concurrency on separate connections:** a second member's join completes while the first join is still uncommitted; the same member in two sessions gets exactly one row; two members' result submissions run in parallel without blocking
   - independent results: no member argument on `submit_result`; cross-user direct update and researcher reopen denied; a completed result is final; PI reopen changes one member only and history keeps the old result; leave and rejoin
   - comments: stored verbatim (BOM, CRLF, Markdown, LaTeX); idempotent retry; whitespace-only and over-20 KiB rejected; author/PI removal keeps the original
@@ -617,7 +627,10 @@ Validation performed on **October 18, 2026** (V2, local only):
     - a failure injected after the full V2 install rolls everything back: V1 data identical by fingerprint, no archive, V1 RPCs and publication unchanged
     - the successful upgrade gives an archive identical to the backup; IDEA-001's Markdown, the profiles and the Auth users are unchanged; V1 functions and helpers are gone; the archive is unpublished and unreadable by members; existing members work on V2
     - a rerun is a no-op; archive removal requires confirmation and leaves profiles unchanged
-- **350 JavaScript syntax/DOM integration checks passed** using a simulated transport:
+- **377 JavaScript syntax/DOM integration checks passed** using a simulated transport:
+  - numeric sorting of 1, 2, 3, 999, 1000 and 10000 with restored older timestamps (both number directions and both date sorts); exact ID search; full four- and five-digit IDs
+  - Delete is shown only to the PI or the creator of an untouched idea; explicit confirmation; helpful messages when the server refuses; in-place Markdown correction keeps the number
+  - switching to text comparison or loosening the Delete rule makes these tests fail
   - Delete visibility follows each comment/reply's author, including mixed-author nested threads; confirmation/cancel, permission errors, researcher self-deletion, retained children and remote PI removal while a focused draft survives
   - the inline discussion: comments under each card, no dialog; Markdown/math/XSS; lost-response retry; a focused draft that keeps its node, text, focus and caret while Realtime inserts other comments; sorting; paging; PI removal
   - replies: an inline Reply box; six levels with the indentation cap and "↪" parent labels; collapse/expand; retry idempotency; XSS; an open reply box surviving Realtime refreshes untouched; cancel with confirmation; replies staying oldest-first; a removed parent keeping its replies; history wording; a remote reply reaching two receivers. Forcing a full rebuild while typing makes the draft test fail
@@ -691,6 +704,26 @@ This change is implemented and tested locally; no production migration, commit, 
 
 The RLS/authorization review retains SELECT-only active-member policies and no direct client INSERT/UPDATE/DELETE grants. The RPC uses SECURITY DEFINER with an empty search path, server-side active membership, `auth.uid()` ownership and the administrator-managed PI role. Only `removed_at` and `removed_by` change; the existing audit trigger records the original and resulting row. The existing parent-idea lock order and conditional update preserve deletion snapshots and ensure concurrent removals cannot overwrite the first actor/time.
 
+## 9C. Let creators delete their own untouched ideas — only after approval
+
+Additive and data-preserving. `supabase/migrations/allow_creator_delete_untouched_idea.sql` replaces only `public.delete_idea` and re-applies its EXECUTE grant, in one transaction. No table, row, trigger, RLS policy, Realtime setting or history event changes, and it is safe to rerun. It requires the V2 schema; it works with or without sections 9 and 9B applied. The sorting, ID and search changes are frontend-only.
+
+1. **Review** the migration. The PI keeps deleting any idea. A creator may delete their own idea only while it has no participation row (withdrawn ones included) and no comment (deleted ones included). Everyone else gets "Permission denied". The checks run after the idea is locked, so a join or comment arriving at the same moment either commits first (and the creator's deletion is then refused) or waits and finds the idea gone. Deletion keeps writing one `deleted` event with the complete snapshot and removes the idea's comments and participants explicitly.
+2. **Migrate first.** In the SQL Editor, as `postgres`, run the whole migration file once. Check it with:
+
+   ```sql
+   select pg_get_functiondef('public.delete_idea(uuid,bigint)'::regprocedure) like '%only the PI or the idea creator%' as updated;
+   ```
+
+   The result must be `true`. The current page keeps working: it shows Delete only to the PI, and the PI's deletions behave as before.
+3. **Then deploy the frontend:** commit and `git push origin main`, wait for GitHub Pages, and hard-reload. Deploying the page first would show creators a Delete button that the old database function refuses, with an error message; no data is at risk, but avoid it.
+4. **Verify live** with disposable ideas:
+   - the list is in ID order by default;
+   - a researcher sees Delete only on their own idea while nobody has joined or commented, and deleting it requires confirmation;
+   - after someone joins, the button is gone and a direct RPC call is refused;
+   - the PI can still delete an idea with contributions, and History shows the full snapshot;
+   - Edit corrects a broken Markdown upload under the same number.
+
 ## Database API reference
 
 Every mutation is a PostgreSQL transaction through one of these RPCs. Every function uses an empty `search_path`, qualified objects, the authenticated caller (`auth.uid()`), and the administrator-managed profile. No RPC accepts a role, and only the PI-only `reopen_result` names another member. Audit triggers write full snapshots in the same transaction, so a rolled-back change creates no historical event.
@@ -699,7 +732,7 @@ Every mutation is a PostgreSQL transaction through one of these RPCs. Every func
 | --- | --- | --- |
 | `create_idea` | `p_title`, `p_description`, `p_week_start`, `p_priority` | Any active member; creator is the caller |
 | `update_idea` | `p_idea_id`, `p_expected_revision`, metadata fields above | Creator or PI |
-| `delete_idea` | `p_idea_id`, `p_expected_revision` | PI; snapshot of participants and comments kept in history |
+| `delete_idea` | `p_idea_id`, `p_expected_revision` | PI: any idea. Creator: only while it has no participants and no comments. Snapshot of participants, results, comments and replies kept in history |
 | `join_idea` | `p_idea_id` | Any active member; new row, or rejoin after withdrawing |
 | `leave_idea` | `p_idea_id`, `p_expected_revision` (participation) | Caller's own row; Testing → Withdrawn |
 | `submit_result` | `p_idea_id`, `p_expected_revision` (participation), `p_result`, optional `p_notes`, `p_experiment_url` | Caller's own row only; Testing → Completed |

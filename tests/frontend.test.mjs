@@ -102,6 +102,13 @@ function perform(name,args) {
     record(idea,'edited',before,idea); return ok(idea);
   }
   if (name==='delete_idea') {
+    // Same rule as the database: PI any idea; creator only an untouched one.
+    if (profiles.find(p=>p.id===currentId)?.role !== 'pi') {
+      if (idea.created_by !== currentId) return {data:null,error:{code:'42501',message:'Permission denied: only the PI or the idea creator can delete this idea'}};
+      if (participants.some(p=>p.idea_id===idea.id) || comments.some(c=>c.idea_id===idea.id)) {
+        return {data:null,error:{code:'42501',message:'Permission denied: this idea already has participants or comments; only the PI can delete it'}};
+      }
+    }
     const before = {...clone(idea),participants:clone(participants.filter(p=>p.idea_id===idea.id)),comments:clone(comments.filter(c=>c.idea_id===idea.id))};
     ideas = ideas.filter(i=>i!==idea); participants = participants.filter(p=>p.idea_id!==idea.id); comments = comments.filter(c=>c.idea_id!==idea.id);
     record(idea,'deleted',before,null); return {data:null,error:null};
@@ -542,6 +549,65 @@ try {
   check([!!deleteControl(retainedChild.id),own(commentNode('IDEA-004',retainedChild.id),'.comment-content').textContent.includes('Comment removed by Shibo'),childBox.value,d.activeElement===childBox,childBox.selectionStart],
     [false,true,'Keep this descendant draft',true,4],'remote PI removal hides Delete and preserves focused draft');
   childBox.blur();currentId='member-0';await app.loadCurrentUser(session());await settled();
+
+  // ---- Default numeric order and IDs beyond 999, including restored ideas with old timestamps.
+  const restoredIdeas=[[1000,'Restored idea A','2026-09-01T00:00:00Z'],[10000,'Restored idea B','2026-08-01T00:00:00Z'],[999,'Restored idea C','2026-10-20T00:00:00Z']]
+    .map(([n,title,created])=>({...base,id:`idea-n${n}`,idea_number:n,title,created_at:created,updated_at:created}));
+  ideas.push(...restoredIdeas);await app.loadIdeas();click('clear-filters');
+  check(d.getElementById('sort').value,'number','default sort is idea number ascending');
+  check([...d.getElementById('sort').options].map(o=>o.value),['number','number-desc','newest','oldest'],'number ↑/↓ plus the existing date sorts');
+  const orderOf=value=>{setFilter('sort',value);return [...app.filteredIdeas()].map(i=>i.idea_number);};
+  check(orderOf('number'),[1,2,3,4,999,1000,10000],'numeric ascending, not lexicographic');
+  check(orderOf('number-desc'),[10000,1000,999,4,3,2,1],'numeric descending');
+  check(orderOf('newest'),[999,1,2,3,4,1000,10000],'newest first still uses creation time');
+  check(orderOf('oldest'),[10000,1000,1,2,3,4,999],'oldest first still uses creation time');
+  click('clear-filters');
+  check([...d.querySelector('.week').querySelectorAll('.idea-number')].map(el=>el.textContent),['IDEA-001','IDEA-002','IDEA-003','IDEA-999','IDEA-1000','IDEA-10000'],'cards in numeric order with full IDs');
+  check([card('IDEA-10000')?.querySelector('.idea-title').textContent,card('IDEA-1000')?.querySelector('.idea-title').textContent],['Restored idea B','Restored idea A'],'four- and five-digit IDs are not truncated');
+  await snapshot('numbers.html');
+  for (const [query,expected] of [['IDEA-1000',[1000]],['idea-10000',[10000]],['1000',[1000]],['IDEA-001',[1]],['IDEA-1',[1]],['idea 999',[999]]]) {
+    setFilter('search',query);check([...app.filteredIdeas()].map(i=>i.idea_number),expected,`search ${query} finds the exact number`);
+  }
+  click('clear-filters');
+  ideas=ideas.filter(i=>!restoredIdeas.includes(i));await app.loadIdeas();
+
+  // ---- Creator deletion: offered only on the creator's untouched ideas; enforced by the RPC.
+  const ideaActions=number=>labels(card(number).querySelector('[data-slot="actions"]'));
+  ideas.push({...base,id:'idea-yan-empty',idea_number:5000,title:'Yan untouched idea',created_by:'member-1'},
+    {...base,id:'idea-yan-commented',idea_number:5001,title:'Yan idea with a comment',description:'# Truncated upload\n\n| a |',created_by:'member-1'},
+    {...base,id:'idea-yan-race',idea_number:5002,title:'Yan idea joined meanwhile',created_by:'member-1'});
+  comments.push({id:'comment-on-5001',idea_id:'idea-yan-commented',author_id:'member-2',body:'Already discussed',client_request_id:'00000000-0000-4000-8000-000000000501',
+    created_at:'2026-10-15T00:00:00Z',removed_at:null,removed_by:null,parent_comment_id:null});
+  currentId='member-1';await app.loadCurrentUser(session());await settled();
+  check([ideaActions('IDEA-5000').includes('Delete'),ideaActions('IDEA-5000').includes('Edit')],[true,true],'creator sees Delete next to Edit on an untouched idea');
+  check([ideaActions('IDEA-5001').includes('Delete'),ideaActions('IDEA-5001').includes('Edit')],[false,true],'no Delete once someone commented; Edit remains');
+  check(ideaActions('IDEA-002').includes('Delete'),false,'no Delete once someone joined');
+  check(ideaActions('IDEA-001').includes('Delete'),false,'no Delete on another member\'s idea');
+  press(card('IDEA-5000').querySelector('[data-slot="actions"]'),'Delete');
+  check([text('modal-title'),text('modal-body').includes('removes IDEA-5000 from the active workspace'),text('modal-body').includes('use Edit')],['Delete IDEA-5000?',true,true],'explicit confirmation explains the removal');
+  submit();await wait(()=>!app.state.pending && !d.getElementById('modal').open);await settled();
+  check(calls.at(-1),{name:'delete_idea',args:{p_idea_id:'idea-yan-empty',p_expected_revision:1}},'creator deletion uses the delete RPC');
+  check(card('IDEA-5000'),undefined,'deleted idea leaves the workspace');
+  participants.push(participation('idea-yan-race','member-2'));   // joined after Yan's page loaded
+  press(card('IDEA-5002').querySelector('[data-slot="actions"]'),'Delete');submit();
+  await wait(()=>!app.state.pending);await settled();
+  check(d.querySelector('#modal-body .error-text')?.textContent,'Someone has already joined or commented on this idea, so only the PI can delete it. You can still use Edit to correct it.','server refusal explained');
+  check(!!card('IDEA-5002'),true,'refused idea stays');app.closeModal();
+  rpcError={code:'42501',message:'Permission denied: only the PI or the idea creator can delete this idea'};
+  app.confirmAction('delete',ideaById('idea-1'));submit();await wait(()=>!app.state.pending);
+  check(d.querySelector('#modal-body .error-text').textContent,'Only the PI or the member who published this idea can delete it.','ownership refusal explained');
+  rpcError=null;app.closeModal();await settled();
+  // Fixing a broken Markdown upload keeps the idea and its number.
+  app.openIdeaDialog(ideaById('idea-yan-commented'));
+  const fixEditor=d.querySelector('#modal-body textarea');fixEditor.value='# Fixed upload\n\n| a | b |\n|---|---|\n| 1 | 2 |';fixEditor.dispatchEvent(new w.Event('input'));
+  submit();await wait(()=>!app.state.pending && !d.getElementById('modal').open);await settled();
+  check([calls.at(-1).name,calls.at(-1).args.p_idea_id,ideaById('idea-yan-commented').idea_number,!!card('IDEA-5001')],['update_idea','idea-yan-commented',5001,true],'creator corrects Markdown in place; number unchanged');
+  check(ideaById('idea-yan-commented').description.startsWith('# Fixed upload'),true,'corrected Markdown saved');
+  currentId='member-0';await app.loadCurrentUser(session());await settled();
+  check([ideaActions('IDEA-5001').includes('Delete'),ideaActions('IDEA-5002').includes('Delete')],[true,true],'the PI may delete ideas with contributions');
+  ideas=ideas.filter(i=>!['idea-yan-commented','idea-yan-race'].includes(i.id));
+  participants=participants.filter(p=>p.idea_id!=='idea-yan-race');comments=comments.filter(c=>c.id!=='comment-on-5001');
+  await app.loadIdeas();
 
   // ---- Conflicts, refresh coalescing, stale and offline states.
   rpcError={message:'Already participating in this idea'};

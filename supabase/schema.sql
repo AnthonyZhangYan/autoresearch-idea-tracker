@@ -477,14 +477,31 @@ begin
 end;
 $$;
 
--- PI only. The 'deleted' event stores the idea with all participant results and
--- comments, then the rows are removed explicitly (no cascading deletes).
+-- The PI may delete any idea. Its creator may delete it only while nobody has
+-- joined it (withdrawn participants count) and no comment exists (removed
+-- comments count). The checks run after the idea is locked FOR UPDATE, which
+-- waits for in-flight joins and comments (they hold KEY SHARE) and blocks new
+-- ones until this transaction ends, so no contribution can slip in between the
+-- check and the deletion. The 'deleted' event stores the idea with all
+-- participant results and comments, then the rows are removed explicitly
+-- (no cascading deletes).
 create or replace function public.delete_idea(p_idea_id uuid, p_expected_revision bigint)
 returns void language plpgsql security definer set search_path = '' as $$
-declare v_idea public.ideas;
+declare v_idea public.ideas; v_role text;
 begin
-  perform tracker_private.require_member(true);
+  v_role := tracker_private.require_member();
   v_idea := tracker_private.lock_idea(p_idea_id, p_expected_revision, true);
+  if v_role <> 'pi' then
+    if v_idea.created_by is distinct from auth.uid() then
+      raise exception using errcode = '42501',
+        message = 'Permission denied: only the PI or the idea creator can delete this idea';
+    end if;
+    if exists (select 1 from public.idea_participants where idea_id = v_idea.id)
+      or exists (select 1 from public.idea_comments where idea_id = v_idea.id) then
+      raise exception using errcode = '42501',
+        message = 'Permission denied: this idea already has participants or comments; only the PI can delete it';
+    end if;
+  end if;
   insert into public.idea_events(idea_id, idea_number, actor_id, event_type, previous_state)
   values (v_idea.id, v_idea.idea_number, tracker_private.current_actor(), 'deleted',
     to_jsonb(v_idea) || jsonb_build_object(
