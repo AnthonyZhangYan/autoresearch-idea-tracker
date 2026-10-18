@@ -790,6 +790,41 @@ try {
   app.renderMarkdown(rendered,'Unclosed $$x and tail\n\n`$$literal$$`\n\n```tex\n$$\\text{cost: \\$5}$$\n```');
   check(rendered.textContent.includes('Unclosed $$x and tail'),true,'unclosed display delimiters remain visible');
   check([...rendered.querySelectorAll('code')].map(el=>el.textContent),['$$literal$$','$$\\text{cost: \\$5}$$\n'],'code math and escapes remain literal');
+
+  // ---- Research-style Markdown: escaped stars, \( \) / \[ \] delimiters, Chinese
+  // mixed with math, nested lists and long formulas (synthetic content only).
+  const unsupported = el => [...el.querySelectorAll('.katex [style*="cc0000"],.katex-error')].map(node=>node.textContent);
+  const texSeen = source => {
+    const engine=w.katex.renderToString, received=[];
+    w.katex.renderToString=(tex,options)=>{received.push([tex,!!options.displayMode]);return engine(tex,options);};
+    try { app.renderMarkdown(rendered,source); } finally { w.katex.renderToString=engine; }
+    return received;
+  };
+  check(texSeen(String.raw`总质量 $\nu(\mathcal{M}) = \|\theta^{\*}\|^2/L$ 由 Euler 恒等式给定；被 $\theta^\*$ 约束的只有 margin。`),
+    [[String.raw`\nu(\mathcal{M}) = \|\theta^{\*}\|^2/L`,false],[String.raw`\theta^\*`,false]],'escaped stars reach KaTeX unchanged');
+  check([unsupported(rendered),rendered.textContent.includes('∗')],[[],true],'Markdown-escaped \\* inside math renders as a star, not a red \\*');
+  check(texSeen(String.raw`行内 \(\nu \ll \pi\) 与 \(\int_{\mathcal{M}} \phi\,d\nu = m\)，以及 \[ \sum_k \mu_k \] 行内展示。`),
+    [[String.raw`\nu \ll \pi`,false],[String.raw`\int_{\mathcal{M}} \phi\,d\nu = m`,false],[String.raw` \sum_k \mu_k `,true]],'\\( \\) inline and \\[ \\] inline-display delimiters');
+  check([rendered.querySelectorAll('.katex').length,rendered.querySelectorAll('.katex-display').length,rendered.textContent.includes('行内展示')],[3,1,true],'bracket math rendered with surrounding Chinese prose');
+  check(texSeen('\\[\n\\int_{\\mathcal{M}} \\phi_k \\, d\\nu = m_k\n\\] 之后的说明\n\n下一段'),[['\n\\int_{\\mathcal{M}} \\phi_k \\, d\\nu = m_k\n',true]],'\\[ \\] block math');
+  check([rendered.querySelectorAll('.katex-display').length,rendered.textContent.includes('之后的说明'),rendered.textContent.includes('下一段')],[1,true,true],'\\[ \\] block keeps trailing prose and the next paragraph');
+  app.renderMarkdown(rendered,'字面量 \\\\(不是公式\\\\) 与代码 `\\(code\\)`');
+  check([rendered.querySelectorAll('.katex').length,rendered.textContent.includes('\\(不是公式\\)'),rendered.querySelector('code').textContent],[0,true,'\\(code\\)'],'escaped \\\\( and code spans stay literal');
+  const research=['**Must preserve:**','','- 未知量是**测度**，不是有限个点。任何把方法退化成 "优化 $M$ 张候选图" 的实现都不算实现本方法。',
+    '- KKT stationarity 以**精确等式约束**进入，不作为 loss 上再加一项的 soft regularizer。',
+    '  - 嵌套：reference prior $\\pi$，必须显式声明且可替换；自由度都归到 $\\pi$ 上。',
+    '    - 第三层：残差证书 (moment residual + margin residual，含 held-out sketch 方向) 必须在无任何训练数据访问下可计算。',
+    '- 长公式：$\\mathcal{L}(\\theta)=\\sum_{i=1}^{n}\\lambda_i\\,\\ell\\big(y_i f_\\theta(x_i)\\big)+\\frac{\\beta}{2}\\|\\theta\\|_2^2+\\gamma\\,\\mathrm{KL}\\big(q_\\phi(z\\mid x)\\,\\|\\,p(z)\\big)$ 之后继续。',
+    '- 中文标点紧跟公式：$\\pi$，$\\nu$；以及「$\\theta^{*}$」。'].join('\n');
+  app.renderMarkdown(rendered,research);
+  check([!!rendered.querySelector('ul ul ul li'),rendered.querySelectorAll('strong').length,rendered.querySelectorAll('.katex').length,unsupported(rendered)],[true,3,7,[]],'nested lists, bold Chinese labels and all seven formulas render');
+  check(['不是有限个点','soft regularizer','必须在无任何训练数据访问下可计算','之后继续','」'].every(part=>rendered.textContent.includes(part)),true,'Chinese prose around math is kept intact');
+  app.renderMarkdown(rendered,'$\\unknowncommand{x}$ 后文');
+  check([unsupported(rendered).length > 0,rendered.textContent.includes('后文'),rendered.querySelector('script')],[true,true,null],'unsupported commands stay visible and safe without breaking the paragraph');
+  for (const attack of [String.raw`\(\href{javascript:alert(1)}{x}\)`,String.raw`\[<img src=x onerror=alert(1)>\]`,String.raw`\(\htmlStyle{background:url(https://example.org/t)}{x}\)`]) {
+    app.renderMarkdown(rendered,attack);
+    check(rendered.querySelector('script,img,[onerror],[href^="javascript"],[style*="url("]'),null,`bracket math stays sanitized: ${attack}`);
+  }
   const attacks=[
     '$$x$$ <img src=x onerror=evil> [bad](javascript:evil)',
     String.raw`$$\text{cost: \$5}$$ <script>evil</script>`,
