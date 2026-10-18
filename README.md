@@ -42,6 +42,7 @@ GitHub Pages: index.html (HTML + CSS + vanilla JavaScript)
 | `tests/database.test.mjs` | Isolated PostgreSQL tests: permissions, concurrency, independent results, comments, audit, publication stream, and the V1→V2 replacement |
 | `tests/fixtures/schema_v1.sql` | Frozen V1 schema, used only to test the replacement script |
 | `supabase/migrations/add_comment_replies.sql` | Additive, transactional migration that adds threaded comment replies to an existing V2 database (section 9) |
+| `supabase/migrations/allow_comment_author_delete.sql` | Incremental, transactional RPC migration allowing authors to soft-delete their own comments/replies while retaining PI moderation (section 9B) |
 | `tests/fixtures/schema_v2_0.sql` | Frozen copy of the deployed V2 schema before replies, used only to test that migration |
 | `tests/frontend.test.mjs` | Syntax and DOM integration tests using a simulated transport |
 | `tests/invitation.test.mjs` | Invitation callback, password setup, login/logout, and allowlist tests with a simulated Auth client and the actual pinned SDK answered by local fetch responses |
@@ -57,7 +58,7 @@ No production Node server, framework, package installation, or build system is r
 - **Participation:** any member can **Join** an idea; several members can test the same idea at once. Each participant has their own row and status (`testing`, `completed`, or `withdrawn`). They can **Leave** while testing and rejoin later.
 - **Independent results:** **Submit my result** records the caller's own Success/Fail, notes and HTTP(S) experiment URL. The database function has no member argument, so no one, including the PI, can write a result into another member's row. A submitted result is final for that member. The PI can **Reopen result** for one member, which returns only that member to Testing; the previous result stays in history.
 - **Discussion:** every idea has a permanent comment section directly under it on the dashboard. There is no popup. It shows a composer with a Markdown/LaTeX preview, the comments with author avatar, relative time and rendered content, oldest- or newest-first sorting, and "Show earlier comments" paging. Realtime updates never erase a draft, including a draft being typed.
-- **Replies:** every comment has **Reply**. The reply box opens inline under that comment, and replies to replies work to any depth. Threads are drawn with indentation and connector lines. Indentation stops after 4 levels (2 on phones); deeper replies show "↪ name" for their real parent. Replies within a thread are always oldest first, and long threads can be collapsed. Comments and replies keep their author, server timestamp and exact original text, and cannot be edited. The PI can remove any of them: a removed comment shows "Comment removed", its replies stay, and it cannot receive new replies. A retried post after a lost network response cannot create a duplicate.
+- **Replies:** every comment has **Reply**. The reply box opens inline under that comment, and replies to replies work to any depth. Threads are drawn with indentation and connector lines. Indentation stops after 4 levels (2 on phones); deeper replies show "↪ name" for their real parent. Replies within a thread are always oldest first, and long threads can be collapsed. Comments and replies keep their author, server timestamp and exact original text, and cannot be edited. The active author can **Delete** their own comments and replies; the active PI can **Delete** any of them: a removed comment shows "Comment removed", its replies stay, and it cannot receive new replies. A retried post after a lost network response cannot create a duplicate.
 - **Activity history:** read-only, with before/after snapshots of idea edits, joins, results, reopened results, comments and removals. Deleting an idea records one snapshot containing every participant result and comment. The global Activity history includes deleted ideas.
 - Six live counters, plus a progress bar for the share of ideas with at least one result. Ideas appear as expandable cards in Monday-based weekly groups, listing each participant's status and result.
 - Search by number/title/description; filters for week, status (open / in progress / has results), participant, result (any success / any fail / none) and priority; newest/oldest/number sorting within weekly groups.
@@ -443,7 +444,7 @@ Run these against the configured project before calling the hosted integration v
 
 - Sign in as each of the four members. Check the name, role, restored session after reload/browser restart, and logout. Logout is for the current browser session; it does not sign the person out on every computer.
 - Signed-out visitors must see only login. A valid Auth user with no active profile must see Access has not been granted and no data. To test that case without adding a fifth public account, temporarily deactivate one existing researcher's profile, test, then restore it as administrator.
-- Every member can publish. A researcher can edit only ideas they created; Shibo can edit and delete any idea. Researchers have no Delete, Reopen result or comment Remove controls.
+- Every member can publish. A researcher can edit only ideas they created; Shibo can edit and delete any idea. Researchers have no idea Delete or Reopen result controls. A comment or reply shows **Delete** to its active author and to the active PI; other researchers cannot delete it, even if they authored its ancestor or the idea.
 - With a researcher signed in, use DevTools to call APIs directly, independent of hidden UI buttons. The existing `state.client` variable is available in the page's console. **Do not print/copy session tokens.**
 
 ```js
@@ -462,7 +463,7 @@ await state.client.rpc('update_idea', {p_idea_id:testIdea.id, p_expected_revisio
 await state.client.rpc('delete_idea', {p_idea_id:testIdea.id, p_expected_revision:testIdea.revision});
 await state.client.rpc('reopen_result', {p_idea_id:testIdea.id, p_member_id:other.member_id,
   p_expected_revision:other.revision});
-await state.client.rpc('remove_comment', {p_comment_id:'<ANY_COMMENT_UUID>'});
+await state.client.rpc('remove_comment', {p_comment_id:'<ANOTHER_AUTHORS_COMMENT_UUID>'});
 ```
 
 `submit_result` has no member argument: it can only change the caller's own row. A completed result cannot be resubmitted or left; a stale `p_expected_revision` must fail. Do not test authorization only in SQL Editor as `postgres`, because that role bypasses RLS.
@@ -487,7 +488,7 @@ Use a real address you control first, ideally your own, before inviting the othe
 3. Yan submits **Success** with notes and an experiment URL; Junqi submits **Fail**. Confirm each row shows its own result. Yan's result does not change when Junqi submits, and Yifan stays Testing. Reload and check again from another browser.
 4. Yifan **Leaves**, then **Rejoins**. Confirm the card and History show both steps.
 5. Shibo **Reopens** Yan's result. Confirm only Yan returns to Testing, Junqi's Fail is unchanged, and History keeps Yan's earlier result, notes and link. Yan submits again.
-6. Under the idea's **Discussion**, every member posts a comment with Markdown and `$x^2$`, then replies to another member's comment and to a reply. Confirm author, time, formatting and nesting appear for all members without Refresh, and that a half-written reply survives another member's new comment. Shibo removes a comment that has replies: it shows "Comment removed by Shibo", the replies stay, and History keeps the original.
+6. Under the idea's **Discussion**, every member posts a comment with Markdown and `$x^2$`, then replies to another member's comment and to a reply. Confirm author, time, formatting and nesting appear for all members without Refresh, and that a half-written reply survives another member's new comment. Each author deletes one of their own comments or replies, then Shibo deletes another author’s comment with replies: each shows the attributed "Comment removed" placeholder, the replies stay, and History keeps the original. Other researchers have no Delete button and their direct RPC attempts are denied.
 7. Shibo deletes the idea. Confirm global Activity history shows the deletion with "Preserved: … participants (… results) and … comments", and the card disappears everywhere. Publish again; its idea number must not reuse the deleted number.
 8. Exercise all filters (status, participant, result, week, priority), search, sort, expand/collapse, empty results, desktop/mobile layout, Tab/Enter/Escape, and canceling dialogs.
 
@@ -583,7 +584,10 @@ If port 55439 is occupied, set `TRACKER_TEST_PORT` to another free port. You can
 
 Validation performed on **October 18, 2026** (V2, local only):
 
-- **247 PostgreSQL checks passed** on a temporary local cluster, using the actual `schema.sql`, replies migration, export query, archive cleanup script and backup verifier:
+- **293 PostgreSQL checks passed** on a temporary local cluster, using the actual `schema.sql`, replies and author-delete migrations, export query, archive cleanup script and backup verifier:
+  - author deletion on top-level comments and nested replies; PI moderation; anonymous, inactive author/PI, nonmember and other-author denial; direct writes and physical deletion denied; full audit snapshots and unchanged descendants
+  - concurrent author/PI deletion produces one removal and one audit event; author deletion and idea deletion serialize in both orders
+  - the incremental author-delete migration preserves all rows and parent links, grants and SELECT-only RLS; reruns preserve removals/history; injected failure rolls back the RPC and ACL; the migrated and fresh-install definitions match
   - threaded replies (October 18, 2026):
     - six-level nesting; parent must exist and belong to the same idea; no self-parent; parent links, text and removals are immutable even for the database owner, so no cycle can form
     - idempotent retries; request IDs cannot move between parents or become top-level
@@ -602,7 +606,7 @@ Validation performed on **October 18, 2026** (V2, local only):
   - all members create; creator-or-PI edit; PI-only delete
   - **concurrency on separate connections:** a second member's join completes while the first join is still uncommitted; the same member in two sessions gets exactly one row; two members' result submissions run in parallel without blocking
   - independent results: no member argument on `submit_result`; cross-user direct update and researcher reopen denied; a completed result is final; PI reopen changes one member only and history keeps the old result; leave and rejoin
-  - comments: stored verbatim (BOM, CRLF, Markdown, LaTeX); idempotent retry; whitespace-only and over-20 KiB rejected; PI-only removal keeps the original
+  - comments: stored verbatim (BOM, CRLF, Markdown, LaTeX); idempotent retry; whitespace-only and over-20 KiB rejected; author/PI removal keeps the original
   - deletion: waits for an in-flight comment, snapshots every participant result and comment (including removed ones), then removes rows explicitly; history stays readable; idea numbers are not reused
   - **parent-before-child lock order, both orders, on separate connections:** for each of `submit_result`, `leave_idea`, `reopen_result` and `remove_comment`, an uncommitted change makes `delete_idea` wait, and the deletion snapshot then contains the committed change. An uncommitted deletion makes the change wait, and the change then fails with "Idea not found". Meanwhile another participant's result, a comment and an idea edit proceed without waiting for an in-flight result. Removing either parent lock from the schema makes these tests fail; this was checked by temporarily breaking the schema
   - actual `pgoutput` logical replication: created/joined/result/comment/deleted all arrive as `idea_events` INSERTs; no DELETE messages; participant and comment rows are not published
@@ -613,7 +617,8 @@ Validation performed on **October 18, 2026** (V2, local only):
     - a failure injected after the full V2 install rolls everything back: V1 data identical by fingerprint, no archive, V1 RPCs and publication unchanged
     - the successful upgrade gives an archive identical to the backup; IDEA-001's Markdown, the profiles and the Auth users are unchanged; V1 functions and helpers are gone; the archive is unpublished and unreadable by members; existing members work on V2
     - a rerun is a no-op; archive removal requires confirmation and leaves profiles unchanged
-- **330 JavaScript syntax/DOM integration checks passed** using a simulated transport:
+- **350 JavaScript syntax/DOM integration checks passed** using a simulated transport:
+  - Delete visibility follows each comment/reply's author, including mixed-author nested threads; confirmation/cancel, permission errors, researcher self-deletion, retained children and remote PI removal while a focused draft survives
   - the inline discussion: comments under each card, no dialog; Markdown/math/XSS; lost-response retry; a focused draft that keeps its node, text, focus and caret while Realtime inserts other comments; sorting; paging; PI removal
   - replies: an inline Reply box; six levels with the indentation cap and "↪" parent labels; collapse/expand; retry idempotency; XSS; an open reply box surviving Realtime refreshes untouched; cancel with confirmation; replies staying oldest-first; a removed parent keeping its replies; history wording; a remote reply reaching two receivers. Forcing a full rebuild while typing makes the draft test fail
   - participant-derived counters, filters and badges; per-participant status, result, notes and links
@@ -675,6 +680,17 @@ This change is **additive**. It does not reset, recreate or archive anything; ev
 
 `supabase/schema.sql` contains the same statements, so fresh installs get replies directly. Running it on the migrated database changes nothing. If the migration fails, nothing changed and the old page keeps working; fix the cause and rerun. If it succeeds but the frontend is not deployed yet, the old page simply never shows replies.
 
+## 9B. Allow authors to soft-delete their comments — manual rollout only
+
+This change is implemented and tested locally; no production migration, commit, push or deployment was performed for this change. For an existing V2 database, use only `supabase/migrations/allow_comment_author_delete.sql` for this permission update. Do not rerun the full setup/upgrade to enable author deletion. If replies are not installed yet, follow section 9 before deploying this frontend.
+
+1. Review the incremental migration and take the usual private database backup. It replaces only `remove_comment(uuid)` and its explicit EXECUTE grants in one transaction; it does not rewrite any data or alter the existing RLS policies, table grants, triggers or reply links. It is safe to rerun. Fresh installs already get the same RPC from `schema.sql`.
+2. After separate rollout approval, an administrator runs the entire migration manually as `postgres`, before deploying the frontend. Old frontends continue working against the updated RPC; the updated frontend against the old RPC will show authors Delete buttons but their requests will be denied.
+3. After separate deployment approval, publish the frontend. Every active author may Delete their own top-level comment or reply; the active PI may Delete any comment. A researcher gains no authority over somebody else's replies by owning their ancestor or the idea. Inactive profiles, nonmembers and anonymous callers are denied by the server.
+4. Verify using disposable comments and nested replies from two members: cancel leaves data untouched; author self-deletion and PI moderation show the attributed placeholder; unrelated authors have no Delete control and direct RPC calls are denied. Original text, all existing descendants and complete before/after history remain readable to authorized members. Removed comments have no Delete or Reply control, while their live children still accept replies. A repeated removal returns `Comment not found` and records no second event.
+
+The RLS/authorization review retains SELECT-only active-member policies and no direct client INSERT/UPDATE/DELETE grants. The RPC uses SECURITY DEFINER with an empty search path, server-side active membership, `auth.uid()` ownership and the administrator-managed PI role. Only `removed_at` and `removed_by` change; the existing audit trigger records the original and resulting row. The existing parent-idea lock order and conditional update preserve deletion snapshots and ensure concurrent removals cannot overwrite the first actor/time.
+
 ## Database API reference
 
 Every mutation is a PostgreSQL transaction through one of these RPCs. Every function uses an empty `search_path`, qualified objects, the authenticated caller (`auth.uid()`), and the administrator-managed profile. No RPC accepts a role, and only the PI-only `reopen_result` names another member. Audit triggers write full snapshots in the same transaction, so a rolled-back change creates no historical event.
@@ -690,7 +706,7 @@ Every mutation is a PostgreSQL transaction through one of these RPCs. Every func
 | `reopen_result` | `p_idea_id`, `p_member_id`, `p_expected_revision` (participation) | PI; that member's Completed → Testing |
 | `add_comment` | `p_idea_id`, `p_body`, `p_client_request_id` | Any active member; the same request ID returns the original comment |
 | `reply_to_comment` | `p_parent_comment_id`, `p_body`, `p_client_request_id` | Any active member; the idea comes from the parent, so cross-idea replies are impossible. Not allowed on a removed comment; the same request ID returns the original reply |
-| `remove_comment` | `p_comment_id` | PI; hides the comment or reply, keeps its text and its replies |
+| `remove_comment` | `p_comment_id` | Active author of this comment/reply or active PI; hides only this row, keeps its text, parent link, replies and audit history |
 
 **Lock order is always parent before child.** Every participant or comment change first takes a `FOR KEY SHARE` lock on its idea, then locks only its own row. `delete_idea` takes `FOR UPDATE` on the idea, which conflicts with those locks: a deletion waits for in-flight changes and then snapshots them, and a change arriving during a deletion waits and then finds the idea gone. Idea edits take `FOR NO KEY UPDATE`, which does not conflict, so members, comments and edits never block each other. Week dates are stored as Monday `DATE`s; timestamps are `TIMESTAMPTZ` and displayed in the viewer's local timezone.
 

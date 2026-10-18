@@ -76,8 +76,11 @@ function perform(name,args) {
     ideas.push(created); record(created,'created',null,created); return ok(created);
   }
   if (name==='remove_comment') {
+    const profile = profiles.find(p=>p.id===currentId && p.active);
+    if (!profile) return fail('Permission denied');
     const comment = comments.find(c=>c.id===args.p_comment_id && !c.removed_at);
     if (!comment) return fail('Comment not found');
+    if (profile.role!=='pi' && comment.author_id!==currentId) return fail('Permission denied');
     const before = clone(comment); Object.assign(comment,{removed_at:'2026-10-16T15:00:00Z',removed_by:currentId});
     record(ideas.find(i=>i.id===comment.idea_id),'comment_removed',before,comment); return ok(comment);
   }
@@ -392,9 +395,9 @@ try {
   check([bodies()[0],bodies().at(-1)],['Bulk comment 21','Bulk comment 0'],'newest-first ordering');
   check(card('IDEA-002').querySelector('.discussion-head h3').textContent,'Discussion (22)','count with many comments');
 
-  // PI removal inline; researchers see no Remove control.
+  // PI deletion inline; researchers see Delete only on their own comments.
   w.confirm=()=>true;
-  press(thread('IDEA-003').querySelector('.comment'),'Remove');
+  press(thread('IDEA-003').querySelector('.comment'),'Delete');
   await wait(()=>thread('IDEA-003').querySelector('.comment.removed'));await settled();
   check(calls.at(-1),{name:'remove_comment',args:{p_comment_id:'comment-1'}},'PI removes a comment inline');
   check(thread('IDEA-003').querySelector('.comment.removed').textContent.includes('Comment removed by Shibo'),true,'removed comment placeholder');
@@ -405,7 +408,10 @@ try {
   click('collapse-all');
   currentId='member-1';await app.loadCurrentUser(session());await settled();
   openCard('IDEA-003');await wait(()=>thread('IDEA-003').querySelector('.comment'));
-  check(labels(thread('IDEA-003')).includes('Remove'),false,'researchers cannot remove comments');
+  for (const li of thread('IDEA-003').querySelectorAll('li.comment')) {
+    const comment = comments.find(c=>c.id===li.dataset.commentId);
+    check(!!li.querySelector('.comment-remove'),!comment.removed_at && comment.author_id===currentId,'researcher Delete visibility follows authorship');
+  }
   check(app.state.commentDrafts.size,0,'drafts never carry over to another account');
   currentId='member-0';await app.loadCurrentUser(session());await settled();
 
@@ -488,7 +494,7 @@ try {
   sort4.value='oldest';sort4.dispatchEvent(new w.Event('change'));
 
   // Removing a parent keeps its replies and closes it to new replies.
-  press(own(commentNode('IDEA-004',rootId),'.comment-head'),'Remove');
+  press(own(commentNode('IDEA-004',rootId),'.comment-head'),'Delete');
   await wait(()=>commentNode('IDEA-004',rootId)?.classList.contains('removed'));await settled();
   const removedRoot=commentNode('IDEA-004',rootId);
   check([own(removedRoot,'.comment-content').textContent.includes('Comment removed by Shibo'),own(removedRoot,'.replies').children.length,labels(own(removedRoot,'.comment-actions')).includes('Reply')],
@@ -499,6 +505,43 @@ try {
   app.openHistory(ideaById('idea-4'));await wait(()=>d.querySelectorAll('.history li').length>0);
   check(text('modal-body').includes('replied to Shibo’s comment'),true,'history shows replies');
   app.closeModal();
+
+  // ---- Author deletion at top level and deep in a mixed-author thread.
+  currentId='member-2';await app.loadCurrentUser(session());await settled();
+  openCard('IDEA-004');await wait(()=>commentNode('IDEA-004',remoteReply.id));
+  const deleteControl = id => own(commentNode('IDEA-004',id),'.comment-head .comment-remove');
+  for (const li of card('IDEA-004').querySelectorAll('li.comment')) {
+    const comment=comments.find(c=>c.id===li.dataset.commentId);
+    check(!!own(li,'.comment-head .comment-remove'),!comment.removed_at && comment.author_id===currentId,'mixed-author nested Delete visibility');
+  }
+  const ownTop = comments.find(c=>c.body==='Remote top-level');
+  check([deleteControl(ownTop.id)?.textContent,deleteControl(remoteReply.id)?.textContent,!!deleteControl(firstReply.id)],['Delete','Delete',false],'researcher can delete own root/reply but not another author reply');
+  const callsBeforeCancel=calls.length;let confirmText;
+  w.confirm=message=>{confirmText=message;return false;};deleteControl(ownTop.id).click();await settled();
+  check([calls.length,ownTop.removed_at],[callsBeforeCancel,null],'cancel deletion makes no RPC or change');
+  check(confirmText.includes('replies and its original text in the activity history are kept'),true,'confirmation explains soft deletion');
+  w.confirm=()=>true;
+  rpcError={code:'42501',message:'Permission denied'};deleteControl(ownTop.id).click();await settled();rpcError=null;
+  check([ownTop.removed_at,!!deleteControl(ownTop.id),text('notifications').includes('permission')],[null,true,true],'failed deletion keeps body and Delete control and shows permission error');
+  deleteControl(ownTop.id).click();await settled();
+  check([ownTop.removed_by,!!deleteControl(ownTop.id),own(commentNode('IDEA-004',ownTop.id),'.comment-content').textContent.includes('Comment removed by Junqi')],['member-2',false,true],'author deletes own top-level comment with attribution');
+  // A nested author deletion retains another member's child and its Reply action.
+  currentId='member-1';await client.rpc('reply_to_comment',{p_parent_comment_id:remoteReply.id,p_body:'Retained child of deleted reply',p_client_request_id:'00000000-0000-4000-8000-000000000079'});currentId='member-2';
+  await app.loadIdeas();await settled();
+  const retainedChild=comments.find(c=>c.body==='Retained child of deleted reply');
+  const retainedBefore=clone(retainedChild);
+  deleteControl(remoteReply.id).click();await settled();
+  check([remoteReply.removed_by,!!deleteControl(remoteReply.id),!!commentNode('IDEA-004',retainedChild.id)],['member-2',false,true],'author deletes own nested reply and retains child');
+  check(retainedChild,retainedBefore,'child data unchanged');
+  check(labels(own(commentNode('IDEA-004',retainedChild.id),'.comment-actions')).includes('Reply'),true,'retained child still accepts replies');
+  // Realtime removal while typing keeps the descendant composer and its draft.
+  currentId='member-1';await app.loadCurrentUser(session());await settled();openCard('IDEA-004');
+  const childBox=openReply(retainedChild.id);typeInto(childBox,'Keep this descendant draft');childBox.focus();childBox.setSelectionRange(4,4);
+  currentId='member-0';await client.rpc('remove_comment',{p_comment_id:retainedChild.id});currentId='member-1';
+  await app.loadIdeas();
+  check([!!deleteControl(retainedChild.id),own(commentNode('IDEA-004',retainedChild.id),'.comment-content').textContent.includes('Comment removed by Shibo'),childBox.value,d.activeElement===childBox,childBox.selectionStart],
+    [false,true,'Keep this descendant draft',true,4],'remote PI removal hides Delete and preserves focused draft');
+  childBox.blur();currentId='member-0';await app.loadCurrentUser(session());await settled();
 
   // ---- Conflicts, refresh coalescing, stale and offline states.
   rpcError={message:'Already participating in this idea'};

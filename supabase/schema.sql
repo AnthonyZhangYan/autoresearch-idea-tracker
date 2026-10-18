@@ -372,7 +372,7 @@ drop trigger if exists idea_comments_audit on public.idea_comments;
 create trigger idea_comments_audit after insert or update on public.idea_comments
   for each row execute function tracker_private.audit_comment();
 
--- Comments are immutable. The only permitted change is the PI's one-time
+-- Comments are immutable. The only permitted change is the author's or PI's one-time
 -- removal (remove_comment), which sets removed_at/removed_by and nothing else.
 create or replace function tracker_private.guard_comment_update()
 returns trigger language plpgsql set search_path = '' as $$
@@ -630,12 +630,15 @@ $$;
 
 create or replace function public.remove_comment(p_comment_id uuid)
 returns public.idea_comments language plpgsql security definer set search_path = '' as $$
-declare v_comment public.idea_comments; v_idea_id uuid;
+declare v_comment public.idea_comments; v_role text;
 begin
-  perform tracker_private.require_member(true);
-  select idea_id into v_idea_id from public.idea_comments where id = p_comment_id;
+  v_role := tracker_private.require_member();
+  select * into v_comment from public.idea_comments where id = p_comment_id;
   if not found then raise exception 'Comment not found'; end if;
-  perform tracker_private.require_idea(v_idea_id); -- parent before child
+  perform tracker_private.require_idea(v_comment.idea_id); -- parent before child
+  if v_role <> 'pi' and v_comment.author_id is distinct from auth.uid() then
+    raise exception using errcode = '42501', message = 'Permission denied';
+  end if;
   update public.idea_comments set removed_at = clock_timestamp(), removed_by = auth.uid()
   where id = p_comment_id and removed_at is null returning * into v_comment;
   if not found then raise exception 'Comment not found'; end if;

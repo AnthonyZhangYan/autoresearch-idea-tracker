@@ -32,9 +32,9 @@ try {
   await db.initialise(); await db.start();
   const admin = db.getPgClient(); await admin.connect(); clients.push(admin);
   await admin.query(`create role anon nologin; create role authenticated nologin; ${authStub}`);
-  const [schema, exportSQL, dropArchiveSQL, v1Schema, repliesMigration, v20Schema] = await Promise.all([read('../supabase/schema.sql'),read('../supabase/export_v1_backup.sql'),
-    read('../supabase/drop_v1_archive.sql'),read('./fixtures/schema_v1.sql'),read('../supabase/migrations/add_comment_replies.sql'),read('./fixtures/schema_v2_0.sql')]);
-  for (const [name,sql] of [['schema.sql',schema],['export',exportSQL],['archive cleanup',dropArchiveSQL],['replies migration',repliesMigration]]) {
+  const [schema, exportSQL, dropArchiveSQL, v1Schema, repliesMigration, v20Schema, authorDeleteMigration] = await Promise.all([read('../supabase/schema.sql'),read('../supabase/export_v1_backup.sql'),
+    read('../supabase/drop_v1_archive.sql'),read('./fixtures/schema_v1.sql'),read('../supabase/migrations/add_comment_replies.sql'),read('./fixtures/schema_v2_0.sql'),read('../supabase/migrations/allow_comment_author_delete.sql')]);
+  for (const [name,sql] of [['schema.sql',schema],['export',exportSQL],['archive cleanup',dropArchiveSQL],['replies migration',repliesMigration],['author deletion migration',authorDeleteMigration]]) {
     check(/```|\\[_*<>]|&(?:lt|gt);/.test(sql),false,`${name} is plain SQL, not escaped Markdown`);
     check(/\bcascade\b/i.test(sql.replace(/--.*$/gm,'')),false,`${name} uses no CASCADE`);
   }
@@ -190,7 +190,7 @@ try {
   await rejects(() => rpc(yan,'add_comment',[randomUUID(),'x',randomUUID()]),/Idea not found/,'comment on missing idea');
   await rejects(() => rpc(outsider,'add_comment',[target,'x',randomUUID()]),/Permission denied/,'outsider cannot comment');
   await rejects(() => rpc(yan,'add_comment',[target,'x',null]),/Missing comment request ID/,'request ID required');
-  await rejects(() => rpc(yan,'remove_comment',[comment.id]),/Permission denied/,'researcher cannot remove comments');
+  await rejects(() => rpc(junqi,'remove_comment',[comment.id]),/Permission denied/,'researcher cannot remove another author comment');
   const removed = await rpc(shibo,'remove_comment',[comment.id]);
   check([removed.removed_by,!!removed.removed_at,removed.body],[users.Shibo,true,markdown],'PI removal hides but keeps original text');
   await rejects(() => rpc(shibo,'remove_comment',[comment.id]),/Comment not found/,'already removed');
@@ -228,14 +228,56 @@ try {
   await rejects(() => admin.query("update public.idea_comments set body='edited' where id=$1",[reply.id]),/Comments are immutable/,'comment text is immutable');
   await rejects(() => yan.query("update public.idea_comments set parent_comment_id=null where id=$1",[reply.id]),/permission denied/,'clients cannot update comments');
   // Removing a parent keeps the thread.
-  await rejects(() => rpc(yan,'remove_comment',[root.id]),/Permission denied/,'researcher cannot remove a comment');
-  await rpc(shibo,'remove_comment',[root.id]);
+  await rejects(() => rpc(junqi,'remove_comment',[root.id]),/Permission denied/,'researcher cannot remove another author parent');
+  const rootRemoved = await rpc(yan,'remove_comment',[root.id]);
+  check([rootRemoved.removed_by,rootRemoved.body],[users.Yan,root.body],'author soft-deletes own top-level comment');
   check((await admin.query('select count(*)::int n from public.idea_comments where idea_id=$1',[threadIdea.id])).rows[0].n,7,'removing a parent keeps every reply');
   await rejects(() => rpc(yifan,'reply_to_comment',[root.id,'x',randomUUID()]),/Cannot reply to a removed comment/,'no new replies to a removed comment');
   check((await rpc(yifan,'reply_to_comment',[reply.id,'Still possible under a removed parent',randomUUID()])).parent_comment_id,reply.id,'the thread under a removed parent stays usable');
   await rejects(() => admin.query('update public.idea_comments set removed_at=null, removed_by=null where id=$1',[root.id]),/Comments are immutable/,'a removal cannot be undone or edited');
   const replyEvents = (await events(threadIdea.id)).filter(e => e.event_type === 'commented' && e.new_state.parent_comment_id);
   check([replyEvents.length,replyEvents[0].new_state.parent_comment_id,replyEvents[0].actor_id],[7,root.id,users.Junqi],'replies recorded in activity history');
+  // Each reply has its own author; owning an ancestor confers no deletion rights.
+  const commentRow = async id => (await admin.query('select * from public.idea_comments where id=$1',[id])).rows[0];
+  const nested = chain[4], nestedBefore = await commentRow(nested.id);
+  const nestedJSON = async () => (await admin.query('select to_jsonb(c) snapshot from public.idea_comments c where id=$1',[nested.id])).rows[0].snapshot;
+  const nestedJSONBefore = await nestedJSON();
+  const threadBefore = (await admin.query('select * from public.idea_comments where idea_id=$1 order by id',[threadIdea.id])).rows;
+  const historyBefore = await events(threadIdea.id);
+  await rejects(() => rpc(yan,'remove_comment',[nested.id]),/Permission denied/,'ancestor author cannot delete another author nested reply');
+  for (const denied of [anon,outsider]) await rejects(() => rpc(denied,'remove_comment',[nested.id]),/permission denied/i,'anonymous/nonmember cannot delete');
+  for (const name of ['Junqi','Shibo']) {
+    await admin.query('update public.profiles set active=false where id=$1',[users[name]]);
+    await rejects(() => rpc(name === 'Junqi' ? junqi : shibo,'remove_comment',[nested.id]),/Permission denied/,'inactive author/PI cannot delete');
+    await admin.query('update public.profiles set active=true where id=$1',[users[name]]);
+  }
+  await rejects(() => junqi.query('update public.idea_comments set removed_at=now(),removed_by=$1 where id=$2',[users.Junqi,nested.id]),/permission denied/,'author cannot bypass RPC with direct update');
+  await rejects(() => shibo.query('delete from public.idea_comments where id=$1',[nested.id]),/permission denied/,'PI cannot physically delete comments');
+  await rejects(() => junqi.query('delete from public.idea_comments where id=$1',[nested.id]),/permission denied/,'author cannot physically delete comments');
+  check(await commentRow(nested.id),nestedBefore,'denied requests do not change comment');
+  check(await events(threadIdea.id),historyBefore,'denied requests add no history');
+  const nestedRemoved = await rpc(junqi,'remove_comment',[nested.id]);
+  check({...nestedRemoved,removed_at:null,removed_by:null},nestedBefore,'nested author removal changes only removal metadata');
+  check(nestedRemoved.removed_by,users.Junqi,'nested author attributed from Auth identity');
+  check((await admin.query('select * from public.idea_comments where idea_id=$1 and id<>$2 order by id',[threadIdea.id,nested.id])).rows,
+    threadBefore.filter(c=>c.id!==nested.id),'nested deletion leaves all ancestors and descendants byte-for-byte intact');
+  const removalEvent = (await events(threadIdea.id)).at(-1);
+  check([removalEvent.event_type,removalEvent.actor_id,removalEvent.previous_state,removalEvent.new_state],
+    ['comment_removed',users.Junqi,nestedJSONBefore,await nestedJSON()],'author deletion audits full before/after state');
+  await rejects(() => rpc(junqi,'remove_comment',[nested.id]),/Comment not found/,'repeat author deletion rejected');
+  check((await events(threadIdea.id)).length,historyBefore.length+1,'repeated removal adds no audit');
+  await rejects(() => rpc(yan,'remove_comment',[randomUUID()]),/Comment not found/,'missing comment deletion rejected');
+  // Concurrent author/PI deletion commits exactly one row update and audit event.
+  const raceComment = await rpc(yan,'add_comment',[threadIdea.id,'Removal race',randomUUID()]);
+  const beforeRaceEvents = (await events(threadIdea.id)).length;
+  await yan.query('begin');
+  const winner = await rpc(yan,'remove_comment',[raceComment.id]);
+  const piRace = rpc(shibo,'remove_comment',[raceComment.id]).then(value=>({value}),error=>({error}));
+  check(await settlesWithin(piRace,300),'pending','PI waits for concurrent author deletion');
+  await yan.query('commit');
+  check((await piRace).error?.message,'Comment not found','concurrent second deletion is rejected');
+  check(await commentRow(raceComment.id),winner,'first deletion actor/time preserved');
+  check((await events(threadIdea.id)).length,beforeRaceEvents+1,'one concurrent deletion audit');
   // Two members reply to the same comment at the same time.
   await yan.query('begin');
   await rpc(yan,'reply_to_comment',[reply.id,'Concurrent A',randomUUID()]);
@@ -247,7 +289,7 @@ try {
   await rpc(shibo,'delete_idea',[threadIdea.id,(await idea(threadIdea.id)).revision]);
   const treeSnapshot = (await events(threadIdea.id)).at(-1).previous_state.comments;
   check([treeSnapshot.length,treeSnapshot.filter(c => c.parent_comment_id).length,(await admin.query('select count(*)::int n from public.idea_comments where idea_id=$1',[threadIdea.id])).rows[0].n],
-    [10,9,0],'deletion snapshot keeps the whole reply tree');
+    [11,9,0],'deletion snapshot keeps the whole reply tree');
 
   // ---- Deactivated members lose access; their results remain attributed.
   await admin.query('update public.profiles set active=false where id=$1',[users.Junqi]);
@@ -321,6 +363,11 @@ try {
       change:async id => rpc(shibo,'remove_comment',[(await admin.query('select id from public.idea_comments where idea_id=$1',[id])).rows[0].id]),
       committed:s => s.comments.some(c => c.body === 'Comment under race' && c.removed_by === users.Shibo),
       untouched:s => s.comments.some(c => c.body === 'Comment under race' && c.removed_at === null)},
+    {name:'author remove_comment',client:yan,
+      prepare:async id => { await rpc(yan,'add_comment',[id,'Author comment under race',randomUUID()]); },
+      change:async id => rpc(yan,'remove_comment',[(await admin.query('select id from public.idea_comments where idea_id=$1',[id])).rows[0].id]),
+      committed:s => s.comments.some(c => c.body === 'Author comment under race' && c.removed_by === users.Yan),
+      untouched:s => s.comments.some(c => c.body === 'Author comment under race' && c.removed_at === null)},
     {name:'reply_to_comment',client:junqi,
       prepare:async id => { await rpc(yan,'add_comment',[id,'Parent under race',randomUUID()]); },
       change:async id => rpc(junqi,'reply_to_comment',[(await admin.query('select id from public.idea_comments where idea_id=$1',[id])).rows[0].id,'Reply under race',randomUUID()]),
@@ -536,13 +583,47 @@ try {
     (select string_agg(column_name || ' ' || data_type || ' ' || is_nullable, ',' order by ordinal_position) from information_schema.columns where table_schema = 'public' and table_name = 'idea_comments') columns,
     (select string_agg(p.proname || ':' || md5(pg_get_functiondef(p.oid)) || ':' || has_function_privilege('authenticated',p.oid,'EXECUTE') || has_function_privilege('anon',p.oid,'EXECUTE'), ',' order by p.proname)
       from pg_proc p where p.proname in ('add_comment','reply_to_comment','remove_comment','guard_comment_update','audit_comment','delete_idea')) functions`)).rows[0];
+  // ---- Incremental author-delete migration on the deployed schema + replies.
+  const liveGrandchild = await rpc(liveYan,'reply_to_comment',[liveReply.id,'Existing grandchild',randomUUID()]);
+  const dataSnapshot = async () => ({...await liveState(),comments:(await live.query('select * from public.idea_comments order by id')).rows});
+  const policySnapshot = async () => (await live.query(`select policyname, cmd, roles, qual, with_check from pg_policies
+    where schemaname='public' order by tablename,policyname`)).rows;
+  const beforeAuthorMigration = await dataSnapshot(), beforeAuthorCatalog = await commentCatalog(live), beforePolicies = await policySnapshot();
+  await rejects(() => rpc(liveYan,'remove_comment',[liveComment.id]),/Permission denied/,'old deployed RPC denies even the author');
+  // Prove an error rolls back the replacement and ACL together.
+  await rejects(() => live.query(authorDeleteMigration.replace(/commit;\s*$/i,()=>"do $$ begin raise exception 'Injected migration failure'; end; $$; commit;")),/Injected migration failure/,'author migration is transactional');
+  await live.query('rollback');
+  check(await commentCatalog(live),beforeAuthorCatalog,'failed migration restores old function and grants');
+  check(await dataSnapshot(),beforeAuthorMigration,'failed migration preserves all data');
+  await live.query(authorDeleteMigration);
+  check(await dataSnapshot(),beforeAuthorMigration,'author migration preserves every row, parent link, result, removal and event');
+  check(await policySnapshot(),beforePolicies,'SELECT-only RLS policies unchanged');
+  check((await live.query(`select relrowsecurity rls,
+    has_table_privilege('authenticated',oid,'UPDATE') u, has_table_privilege('authenticated',oid,'DELETE') d,
+    has_table_privilege('authenticated',oid,'INSERT') i, has_table_privilege('anon',oid,'SELECT') a
+    from pg_class where oid='public.idea_comments'::regclass`)).rows[0],{rls:true,u:false,d:false,i:false,a:false},'migration does not open direct writes or anonymous reads');
+  await live.query(authorDeleteMigration);
+  check(await dataSnapshot(),beforeAuthorMigration,'repeating author migration preserves all data');
   check(await commentCatalog(live),await commentCatalog(admin),'migrated and freshly installed comment schemas are identical');
+  await rejects(() => rpc(liveJunqi,'remove_comment',[liveComment.id]),/Permission denied/,'migrated RPC rejects other authors');
+  const liveDeleted = await rpc(liveYan,'remove_comment',[liveComment.id]);
+  check([liveDeleted.removed_by,liveDeleted.body],[users.Yan,liveComment.body],'migrated author deletes pre-existing comment');
+  check((await live.query('select * from public.idea_comments where id=$1',[liveReply.id])).rows[0],liveReply,'pre-existing reply stays intact after parent deletion');
+  const liveDeletedReply = await rpc(liveJunqi,'remove_comment',[liveReply.id]);
+  check([liveDeletedReply.removed_by,liveDeletedReply.parent_comment_id],[users.Junqi,liveComment.id],'migrated author deletes own pre-existing reply');
+  check((await live.query('select * from public.idea_comments where id=$1',[liveGrandchild.id])).rows[0],liveGrandchild,'pre-existing grandchild stays intact');
+  check((await rpc(liveShibo,'remove_comment',[liveGrandchild.id])).removed_by,users.Shibo,'migrated PI still deletes another author reply');
+  const afterAuthorDeletes = await dataSnapshot();
+  await live.query(authorDeleteMigration);
+  check(await dataSnapshot(),afterAuthorDeletes,'rerun preserves removals and history');
   await live.query(schema);
-  check(await liveState(),beforeRerun2,'running the full schema.sql afterwards changes nothing');
+  check(await dataSnapshot(),afterAuthorDeletes,'running the full schema.sql afterwards changes nothing');
   await admin.query('create database not_v2');
   const notV2 = db.getPgClient('not_v2'); await notV2.connect(); clients.push(notV2);
   await notV2.query(authStub);
   await rejects(() => notV2.query(repliesMigration),/requires the V2 schema/,'migration refuses to run without V2');
+  await notV2.query('rollback');
+  await rejects(() => notV2.query(authorDeleteMigration),/requires the V2 schema/,'author migration refuses a missing V2 schema');
   await notV2.query('rollback');
 
   console.log(`PASS: ${checks} PostgreSQL checks, including threaded replies and their additive migration, concurrent participation, parallel independent results, comment idempotency, publication WAL filtering, parent-before-child deletion races, and the backup-verified single-transaction V1 upgrade. Hosted Supabase was not used.`);

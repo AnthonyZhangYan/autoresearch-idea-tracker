@@ -113,6 +113,7 @@ const titleCase = value => value ? value[0].toUpperCase() + value.slice(1) : 'â€
 const ideaNumber = value => `IDEA-${String(value).padStart(3, '0')}`;
 const memberName = id => state.profiles.find(p => p.id === id)?.display_name || (id ? 'Former member' : 'Nobody');
 const isPI = () => state.profile?.role === 'pi';
+const canRemoveComment = comment => !!state.profile?.active && !comment.removed_at && (isPI() || comment.author_id === state.userId);
 function node(tag, className, text) {
   const element = document.createElement(tag);
   if (className) element.className = className;
@@ -950,7 +951,12 @@ function syncThread(card, idea) {
   }
   for (const li of nodes.values()) {
     const comment = tree.byId.get(li.dataset.commentId);
-    if (comment) ownPart(li,'.comment-actions').replaceChildren(...commentActions(idea,comment,tree,li));
+    if (comment) {
+      const remove = ownPart(li,'.comment-head .comment-remove');
+      if (!canRemoveComment(comment)) remove?.remove();
+      else if (!remove) ownPart(li,'.comment-head').append(commentDeleteButton(comment));
+      ownPart(li,'.comment-actions').replaceChildren(...commentActions(idea,comment,tree,li));
+    }
   }
 }
 function commentAvatar(memberId) {
@@ -959,6 +965,11 @@ function commentAvatar(memberId) {
   return avatar;
 }
 const removedNote = comment => node('p','comment-removed',`Comment removed by ${memberName(comment.removed_by)} Â· ${dateText(comment.removed_at,true)}`);
+function commentDeleteButton(comment) {
+  const remove = button('Delete','quiet danger comment-remove',() => void removeComment(comment),true);
+  remove.dataset.focusKey = `${comment.id}-remove`;
+  return remove;
+}
 function renderComment(idea, comment, depth, tree) {
   const item = node('li',`comment${comment.removed_at ? ' removed' : ''}`);
   item.dataset.commentId = comment.id; item.dataset.depth = String(depth);
@@ -972,10 +983,7 @@ function renderComment(idea, comment, depth, tree) {
   head.append(time);
   if (comment.removed_at) content.append(removedNote(comment));
   else {
-    if (isPI()) {
-      const remove = button('Remove','quiet danger comment-remove',() => void removeComment(comment),true);
-      remove.dataset.focusKey = `${comment.id}-remove`; head.append(remove);
-    }
+    if (canRemoveComment(comment)) head.append(commentDeleteButton(comment));
     const body = node('div','markdown-body'); renderMarkdown(body,comment.body); content.append(body);
   }
   const actions = node('div','comment-actions'), slot = node('div','reply-slot'), replies = node('ol','replies');
@@ -1029,7 +1037,8 @@ function closeReplyComposer(idea, comment, li, confirmDiscard) {
   ownPart(li,'.comment-actions .reply-button')?.focus();
 }
 async function removeComment(comment) {
-  if (!window.confirm('Remove this comment? It will be hidden from the discussion; its replies and its original text in the activity history are kept.')) return;
+  if (state.pending || !canRemoveComment(comment)) return;
+  if (!window.confirm('Delete this comment? It will be hidden from the discussion; its replies and its original text in the activity history are kept.')) return;
   const error = cardFor(comment.idea_id)?.querySelector('.composer .error-text') || null;
   await mutate('remove_comment',{p_comment_id:comment.id},'Comment removed.',error,{keepOpen:true});
 }
