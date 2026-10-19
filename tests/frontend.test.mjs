@@ -611,6 +611,30 @@ try {
   check(style(ideaHead('IDEA-1000')).backgroundColor!==style(weekHead()).backgroundColor,true,'idea header stays distinct from the week header');
   ideaHead('IDEA-10000').click();await wait(()=>card('IDEA-10000').open);
   await snapshot('headers.html');
+
+  // ---- Priority colours: titles, a tag after every title, and both priority dropdowns.
+  const tagOf=n=>card(n).querySelector('.idea-heading > .priority-tag');
+  check(['IDEA-001','IDEA-002','IDEA-003','IDEA-004'].map(n=>[card(n).dataset.priority,tagOf(n)?.textContent,tagOf(n)?.previousElementSibling?.className]),
+    [['high','High','idea-title'],['medium','Medium','idea-title'],['low','Low','idea-title'],['high','High','idea-title']],'each title is followed by its priority tag');
+  check(card('IDEA-002').querySelector('.idea-title').textContent,'Compare memory retrieval strategies','title text itself unchanged');
+  const priorityColours={high:['rgb(255, 195, 155)','rgb(255, 176, 122)'],medium:['rgb(245, 220, 150)','rgb(242, 210, 126)'],low:['rgb(205, 196, 255)','rgb(195, 184, 255)']};
+  for (const [number,priority] of [['IDEA-001','high'],['IDEA-002','medium'],['IDEA-003','low']]) {
+    check([style(card(number).querySelector('.idea-title')).color,style(tagOf(number)).color],priorityColours[priority],`${priority} title and tag colours`);
+  }
+  check(new Set(['IDEA-001','IDEA-002','IDEA-003'].map(n=>style(card(n).querySelector('.idea-title')).color)).size,3,'three priorities have three title colours');
+  const priorityFilter=d.getElementById('priority-filter');
+  check([priorityFilter.classList.contains('priority-select'),...['high','medium','low'].map(v=>style(priorityFilter.querySelector(`option[value=${v}]`)).color)],
+    [true,priorityColours.high[1],priorityColours.medium[1],priorityColours.low[1]],'filter dropdown options use the priority colours');
+  setFilter('priority-filter','low');
+  check([priorityFilter.dataset.priority,style(priorityFilter).color,[...app.filteredIdeas()].map(i=>i.priority)],['low',priorityColours.low[1],['low']],'chosen priority tints the filter and still filters');
+  click('clear-filters');
+  check([priorityFilter.value,priorityFilter.dataset.priority],['',''],'Clear filters removes the tint');
+  app.openIdeaDialog();
+  const dialogPriority=d.querySelector('#modal-body select');
+  check([dialogPriority.classList.contains('priority-select'),dialogPriority.dataset.priority],[true,'medium'],'publish dialog priority dropdown is tinted');
+  dialogPriority.value='high';dialogPriority.dispatchEvent(new w.Event('change'));
+  check([dialogPriority.dataset.priority,style(dialogPriority).color],['high',priorityColours.high[1]],'dialog dropdown follows the chosen priority');
+  app.closeModal();
   ideaHead('IDEA-10000').click();await wait(()=>!card('IDEA-10000').open);
   for (const [query,expected] of [['IDEA-1000',[1000]],['idea-10000',[10000]],['1000',[1000]],['IDEA-001',[1]],['IDEA-1',[1]],['idea 999',[999]]]) {
     setFilter('search',query);check([...app.filteredIdeas()].map(i=>i.idea_number),expected,`search ${query} finds the exact number`);
