@@ -44,6 +44,7 @@ GitHub Pages: index.html (HTML + CSS + vanilla JavaScript)
 | `supabase/migrations/add_comment_replies.sql` | Additive, transactional migration that adds threaded comment replies to an existing V2 database (section 9) |
 | `supabase/migrations/allow_comment_author_delete.sql` | Incremental, transactional RPC migration allowing authors to soft-delete their own comments/replies while retaining PI moderation (section 9B) |
 | `supabase/migrations/allow_creator_delete_untouched_idea.sql` | Transactional RPC migration allowing an idea's creator to delete it while nobody has joined or commented (section 9C) |
+| `supabase/migrations/add_notification_reads.sql` | Additive, transactional migration adding the per-member notification read position (`notification_reads`) and `mark_notifications_read` (section 9D) |
 | `tests/fixtures/schema_v2_0.sql` | Frozen copy of the deployed V2 schema before replies, used only to test that migration |
 | `tests/frontend.test.mjs` | Syntax and DOM integration tests using a simulated transport |
 | `tests/invitation.test.mjs` | Invitation callback, password setup, login/logout, and allowlist tests with a simulated Auth client and the actual pinned SDK answered by local fetch responses |
@@ -60,6 +61,8 @@ No production Node server, framework, package installation, or build system is r
 - **Independent results:** **Submit my result** records the caller's own Success/Fail, notes and HTTP(S) experiment URL. The database function has no member argument, so no one, including the PI, can write a result into another member's row. A submitted result is final for that member. The PI can **Reopen result** for one member, which returns only that member to Testing; the previous result stays in history.
 - **Discussion:** every idea has a permanent comment section directly under it on the dashboard. There is no popup. It shows a composer with a Markdown/LaTeX preview, the comments with author avatar, relative time and rendered content, oldest- or newest-first sorting, and "Show earlier comments" paging. Realtime updates never erase a draft, including a draft being typed.
 - **Replies:** every comment has **Reply**. The reply box opens inline under that comment, and replies to replies work to any depth. Threads are drawn with indentation and connector lines. Indentation stops after 4 levels (2 on phones); deeper replies show "↪ name" for their real parent. Replies within a thread are always oldest first, and long threads can be collapsed. Comments and replies keep their author, server timestamp and exact original text, and cannot be edited. The active author can **Delete** their own comments and replies; the active PI can **Delete** any of them: a removed comment shows "Comment removed", its replies stay, and it cannot receive new replies. A retried post after a lost network response cannot create a duplicate.
+- **Notifications:** a bell next to **Log out** shows an unread count and opens a panel of the newest 50 notifications, each with the actor's avatar. Everyone is notified when anyone publishes a new idea. You are also notified when someone replies to your comment, removes your comment or reopens your result, and about joins, leaves (creator only), results, comments, edits and deletion on ideas you created or joined. Your own actions never notify you. While the page is open, new notifications also pop up briefly. Clicking one opens that idea (and scrolls to and highlights the comment or reply); a deleted idea opens its history. Notifications are derived from the existing Activity history; only each member's read position is stored, so read/unread is the same on every device. Opening the panel marks everything as read. If notifications cannot be loaded, the rest of the dashboard keeps working.
+- Members have distinct avatar colours, and two-letter initials where first letters clash (e.g. `Ya`/`Yi`).
 - **Activity history:** read-only, with before/after snapshots of idea edits, joins, results, reopened results, comments and removals. Deleting an idea records one snapshot containing every participant result and comment. The global Activity history includes deleted ideas.
 - Six live counters, plus a progress bar for the share of ideas with at least one result. Ideas appear as expandable cards in Monday-based weekly groups, listing each participant's status and result. The two collapsible levels look different: week headers are a slate/blue-gray band; idea headers are neutral, lighter while collapsed and darker while expanded, above the lighter idea content. Both headers are fully clickable, with a rotating caret and hover feedback, and keep their open/closed state across Realtime refreshes.
 - Search by ID (`IDEA-1000`, `idea 1000` or `1000` find exactly that idea, not `IDEA-10000`), title or description; filters for week, status (open / in progress / has results), participant, result (any success / any fail / none) and priority; sorting by **idea number descending (default)**, idea number ascending, newest or oldest. **Clear filters** restores idea number descending. Numbers are compared as integers, so `IDEA-10000` comes before `IDEA-1000` and `IDEA-999` regardless of creation timestamps. Weeks keep their grouping, and ideas within each week follow the selected order.
@@ -203,7 +206,7 @@ where oid in ('public.profiles'::regclass, 'public.ideas'::regclass,
 select table_name, grantee, privilege_type
 from information_schema.role_table_grants
 where table_schema = 'public'
-  and table_name in ('profiles', 'ideas', 'idea_participants', 'idea_comments', 'idea_events')
+  and table_name in ('profiles', 'ideas', 'idea_participants', 'idea_comments', 'idea_events', 'notification_reads')
   and grantee in ('anon', 'authenticated', 'PUBLIC')
 order by table_name, grantee, privilege_type;
 
@@ -216,7 +219,7 @@ select p.proname,
 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public' and p.proname in
  ('create_idea', 'update_idea', 'delete_idea', 'join_idea', 'leave_idea', 'submit_result',
-  'reopen_result', 'add_comment', 'remove_comment',
+  'reopen_result', 'add_comment', 'reply_to_comment', 'remove_comment', 'mark_notifications_read',
   'claim_idea', 'release_idea', 'complete_idea', 'reopen_idea');
 ```
 
@@ -585,7 +588,9 @@ If port 55439 is occupied, set `TRACKER_TEST_PORT` to another free port. You can
 
 Validation performed on **October 18, 2026** (V2, local only):
 
-- **337 PostgreSQL checks passed** on a temporary local cluster, using the actual `schema.sql`, replies, author-delete and creator-delete migrations, export query, archive cleanup script and backup verifier:
+- **366 PostgreSQL checks passed** on a temporary local cluster, using the actual `schema.sql`, replies, author-delete, creator-delete and notification migrations, export query, archive cleanup script and backup verifier:
+  - notification read state: members see and advance only their own row; the position never moves backwards and cannot pass the newest event; direct insert/update/delete, invalid positions, outsiders and anonymous callers are refused; two devices racing keep the furthest position
+  - the notification migration on a database built from the deployed chain (V2 + replies + author delete + creator delete): transactional, changes no data, RLS policy or Realtime publication, starts existing members with all history read, a rerun never resets read positions, refuses to run without V2, and the result is identical to a fresh install. Removing `greatest` from the RPC or editing the migration's copy makes these tests fail
   - author deletion on top-level comments and nested replies; PI moderation; anonymous, inactive author/PI, nonmember and other-author denial; direct writes and physical deletion denied; full audit snapshots and unchanged descendants
   - concurrent author/PI deletion produces one removal and one audit event; author deletion and idea deletion serialize in both orders
   - the incremental author-delete migration preserves all rows and parent links, grants and SELECT-only RLS; reruns preserve removals/history; injected failure rolls back the RPC and ACL; the migrated and fresh-install definitions match
@@ -602,7 +607,7 @@ Validation performed on **October 18, 2026** (V2, local only):
     - it refuses to run without V2
     - the migrated database's comment constraints, indexes, triggers, columns, functions and grants are identical to a fresh install
   - temporarily removing the reply lock or editing the migration's copy of a function makes these tests fail
-  - fresh install and rerun; RLS, grants, `security definer` and fixed `search_path` on all ten RPCs; no V1 columns or RPCs; no cascading foreign keys and no `CASCADE` in any SQL file
+  - fresh install and rerun; RLS, grants, `security definer` and fixed `search_path` on all eleven RPCs; no V1 columns or RPCs; no cascading foreign keys and no `CASCADE` in any SQL file
   - member-only reads; anonymous, outsider and deactivated-member denial; direct table writes, sequences and private helpers denied
   - all members create; creator-or-PI edit; deletion rules (October 18, 2026):
     - the PI deletes any idea, with a complete snapshot of results, comments and replies, and no orphans
@@ -627,7 +632,9 @@ Validation performed on **October 18, 2026** (V2, local only):
     - a failure injected after the full V2 install rolls everything back: V1 data identical by fingerprint, no archive, V1 RPCs and publication unchanged
     - the successful upgrade gives an archive identical to the backup; IDEA-001's Markdown, the profiles and the Auth users are unchanged; V1 functions and helpers are gone; the archive is unpublished and unreadable by members; existing members work on V2
     - a rerun is a no-op; archive removal requires confirmation and leaves profiles unchanged
-- **393 JavaScript syntax/DOM integration checks passed** using a simulated transport:
+- **436 JavaScript syntax/DOM integration checks passed** using a simulated transport:
+  - notifications: the PI's and a researcher's views (new ideas for everyone, replies, results, joins, comments, deletions and removed comments; own actions excluded), unread count and label, pop-ups only for arrivals, marking read through the RPC, read state shared across devices, clicking a reply opening and highlighting it, a deleted idea opening its history, outside click and Escape closing the panel, a missing table degrading to a message, and nothing leaking across an account switch. Letting your own actions notify you makes these tests fail
+  - avatars: four members get four distinct colours and `S`/`Ya`/`J`/`Yi` initials
   - descending default and Clear filters; ascending and descending order within each week; week and idea headers collapse and expand on click, stay that way after a Realtime refresh, and have three distinct header backgrounds
   - the header tests also caught a bug, now fixed: a refresh between the click and the browser's toggle event could undo the click
   - numeric sorting of 1, 2, 3, 999, 1000 and 10000 with restored older timestamps (both number directions and both date sorts); exact ID search; full four- and five-digit IDs
@@ -726,6 +733,32 @@ Additive and data-preserving. `supabase/migrations/allow_creator_delete_untouche
    - the PI can still delete an idea with contributions, and History shows the full snapshot;
    - Edit corrects a broken Markdown upload under the same number.
 
+## 9D. Add notifications — only after approval
+
+Additive and data-preserving. Notifications are computed in the browser from the existing `idea_events` history, so no notification rows are written by any trigger. `supabase/migrations/add_notification_reads.sql` only adds, in one transaction:
+
+- table `public.notification_reads` (one row per member: the newest event id that member has read), with SELECT-only RLS restricted to the member's own row and no direct write grants;
+- RPC `public.mark_notifications_read(p_last_event_id bigint)`, which only ever moves the caller's own position forward and never past the newest event;
+- one row per existing member set to the current newest event, so existing history starts as read instead of flooding everyone.
+
+It does not change ideas, participants, results, comments, history, profiles, Auth users, existing RPCs, RLS policies or the Realtime publication, and it is safe to rerun (existing read positions are kept). It requires the V2 schema and works with or without sections 9–9C.
+
+1. **Review** the migration and take the usual private backup.
+2. **Migrate first.** In the SQL Editor, as `postgres`, run the whole file once. Check it with:
+
+   ```sql
+   select count(*) as members_with_position,
+          (select count(*) from public.profiles) as members,
+          to_regprocedure('public.mark_notifications_read(bigint)') is not null as rpc_installed
+   from public.notification_reads;
+   ```
+
+   The two counts must be equal and `rpc_installed` must be `true`. The current page ignores the new table and keeps working.
+3. **Then deploy the frontend:** commit and `git push origin main`, wait for GitHub Pages, and hard-reload. If the page were deployed first, the bell would only say notifications are unavailable; the dashboard itself is unaffected.
+4. **Verify live** with disposable content: a new idea from one member raises the bell count for all others; a reply raises it for the parent comment's author; opening the panel clears the count, also on a second device after refresh; clicking a notification opens and highlights the comment.
+
+New members added later get their read row on first sign-in.
+
 ## Database API reference
 
 Every mutation is a PostgreSQL transaction through one of these RPCs. Every function uses an empty `search_path`, qualified objects, the authenticated caller (`auth.uid()`), and the administrator-managed profile. No RPC accepts a role, and only the PI-only `reopen_result` names another member. Audit triggers write full snapshots in the same transaction, so a rolled-back change creates no historical event.
@@ -742,6 +775,7 @@ Every mutation is a PostgreSQL transaction through one of these RPCs. Every func
 | `add_comment` | `p_idea_id`, `p_body`, `p_client_request_id` | Any active member; the same request ID returns the original comment |
 | `reply_to_comment` | `p_parent_comment_id`, `p_body`, `p_client_request_id` | Any active member; the idea comes from the parent, so cross-idea replies are impossible. Not allowed on a removed comment; the same request ID returns the original reply |
 | `remove_comment` | `p_comment_id` | Active author of this comment/reply or active PI; hides only this row, keeps its text, parent link, replies and audit history |
+| `mark_notifications_read` | `p_last_event_id` | Any active member; only the caller's own read position, which never moves backwards and is capped at the newest event |
 
 **Lock order is always parent before child.** Every participant or comment change first takes a `FOR KEY SHARE` lock on its idea, then locks only its own row. `delete_idea` takes `FOR UPDATE` on the idea, which conflicts with those locks: a deletion waits for in-flight changes and then snapshots them, and a change arriving during a deletion waits and then finds the idea gone. Idea edits take `FOR NO KEY UPDATE`, which does not conflict, so members, comments and edits never block each other. Week dates are stored as Monday `DATE`s; timestamps are `TIMESTAMPTZ` and displayed in the viewer's local timezone.
 

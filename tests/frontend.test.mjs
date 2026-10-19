@@ -44,20 +44,30 @@ let participants = [
 let comments = [{id:'comment-1',idea_id:'idea-3',author_id:'member-2',body:'Initial **synthetic** note with $x^2$.',
   client_request_id:'00000000-0000-4000-8000-000000000001',created_at:'2026-10-13T16:00:00Z',removed_at:null,removed_by:null}];
 let events = [], currentId = 'member-0', authCallback, channel, rpcError, loseNextResponse = false, readsFail = false, delayRead, calls = [], removed = 0, serial = 100;
+let notificationReads = [], readCalls = [], notificationsFail = false;
 const session = () => currentId ? {user:{id:currentId},access_token:'synthetic-test-token'} : null;
-const rowsFor = table => ({profiles,ideas,idea_participants:participants,idea_comments:comments})[table] || [...events].reverse();
+const rowsFor = table => ({profiles,ideas,idea_participants:participants,idea_comments:comments,notification_reads:notificationReads})[table] || [...events].reverse();
+// Applies a PostgREST select list, including JSON paths such as "title:new_state->>title".
+const project = (rows,columns) => !columns || columns === '*' ? rows : rows.map(row => Object.fromEntries(columns.split(',').map(part => {
+  const [alias,expression] = part.includes(':') ? part.split(':') : [part,part];
+  const path = expression.match(/^(\w+)->(>?)(\w+)$/);
+  if (!path) return [alias,row[expression]];
+  const value = row[path[1]]?.[path[3]];
+  return [alias,value === undefined || value === null ? null : path[2] ? (typeof value === 'object' ? JSON.stringify(value) : String(value)) : value];
+})));
 function query(table) {
   const filters = []; let low=0, high=Infinity, limit=Infinity, single=false;
   const builder = {
-    select(){return this;},order(){return this;},eq(key,value){filters.push(row=>row[key]===value);return this;},
+    select(columns){this.columns=columns;return this;},order(){return this;},eq(key,value){filters.push(row=>row[key]===value);return this;},
     lt(key,value){filters.push(row=>Number(row[key])<Number(value));return this;},
     range(from,to){low=from;high=to;return this;},limit(value){limit=value;return this;},maybeSingle(){single=true;return this;},
     async then(resolve,reject) {
       try {
         if (delayRead && table==='ideas') { const delay=delayRead; delayRead=null; await delay; }
         if (readsFail) return resolve({data:null,error:{message:'Network unavailable'}});
+        if (notificationsFail && table==='notification_reads') return resolve({data:null,error:{code:'42P01',message:'relation "public.notification_reads" does not exist'}});
         let rows = clone(rowsFor(table));
-        rows = rows.filter(row=>filters.every(filter=>filter(row))).slice(low,Math.min(high+1,low+limit));
+        rows = project(rows.filter(row=>filters.every(filter=>filter(row))).slice(low,Math.min(high+1,low+limit)),this.columns);
         resolve({data:single ? rows[0] || null : rows,error:null});
       } catch(error) { reject(error); }
     }
@@ -158,6 +168,16 @@ const client = {
   channel(){ channel={handlers:[],on(type,filter,callback){this.handlers.push({filter,callback});return this;},subscribe(callback){this.status=callback;setTimeout(()=>callback('SUBSCRIBED'),0);return this;}}; return channel; },
   async removeChannel(){removed++;},
   async rpc(name,args){
+    // Read-position updates happen in the background; record them separately so
+    // they never shift the action calls the other tests inspect.
+    if (name==='mark_notifications_read') {
+      readCalls.push(clone(args));
+      const newest = Math.max(0,...events.map(e=>e.id)), position = Math.min(args.p_last_event_id,newest);
+      let row = notificationReads.find(r=>r.member_id===currentId);
+      if (!row) notificationReads.push(row = {member_id:currentId,last_read_event_id:position});
+      else row.last_read_event_id = Math.max(row.last_read_event_id,position);
+      return ok(row);
+    }
     calls.push({name,args:clone(args)});
     if (rpcError) return {data:null,error:rpcError};
     const result = perform(name,args);
@@ -292,6 +312,7 @@ try {
   // ---- A second member's view: own result only, no PI controls.
   currentId='member-1';await app.loadCurrentUser(session());await settled();
   check(text('identity'),'Logged in as Yan','researcher session');
+  check([text('avatar'),d.getElementById('avatar').classList.contains('tone-1')],['Ya',true],'account avatar uses the same initials and tone');
   check(d.getElementById('create-button').hidden,false,'researchers can publish');
   check(labels(d.getElementById('ideas')).includes('Delete'),false,'researcher cannot delete');
   check(labels(d.getElementById('ideas')).filter(l=>l==='Edit').length,app.state.ideas.filter(i=>i.created_by==='member-1').length,'edit only own ideas');
@@ -401,6 +422,11 @@ try {
   const sort=card('IDEA-002').querySelector('.discussion-head select');sort.value='newest';sort.dispatchEvent(new w.Event('change'));
   check([bodies()[0],bodies().at(-1)],['Bulk comment 21','Bulk comment 0'],'newest-first ordering');
   check(card('IDEA-002').querySelector('.discussion-head h3').textContent,'Discussion (22)','count with many comments');
+  // Avatars: Yan and Yifan share a first letter, so both initials and colours must differ.
+  const avatarOf=body=>[...thread('IDEA-002').querySelectorAll('li.comment')].find(li=>li.querySelector('.markdown-body')?.textContent.trim()===body).querySelector('.comment-avatar');
+  const avatars=['Bulk comment 20','Bulk comment 21','Bulk comment 18','Bulk comment 19'].map(avatarOf);
+  check(avatars.map(a=>[a.textContent,[...a.classList].find(c=>c.startsWith('tone-'))]),[['S','tone-0'],['Ya','tone-1'],['J','tone-2'],['Yi','tone-3']],'Shibo S, Yan Ya, Junqi J, Yifan Yi, each with its own tone');
+  check(new Set(avatars.map(a=>w.getComputedStyle(a).backgroundColor)).size,4,'four members, four avatar colours');
 
   // PI deletion inline; researchers see Delete only on their own comments.
   w.confirm=()=>true;
@@ -679,6 +705,77 @@ try {
   ideas=ideas.filter(i=>!['idea-yan-commented','idea-yan-race'].includes(i.id));
   participants=participants.filter(p=>p.idea_id!=='idea-yan-race');comments=comments.filter(c=>c.id!=='comment-on-5001');
   await app.loadIdeas();
+
+  // ---- Notifications: derived from activity history; read position shared across devices.
+  const bellCount=()=>d.getElementById('bell-count').hidden ? 0 : d.getElementById('bell-count').textContent;
+  const bellTexts=()=>[...d.querySelectorAll('#bell-list .bell-text')].map(el=>el.textContent);
+  const bellButton=d.getElementById('bell-button'), bellPanel=d.getElementById('bell-panel');
+  const openBell=()=>{ if (bellPanel.hidden) bellButton.click(); };
+  const closeBell=()=>{ if (!bellPanel.hidden) bellButton.click(); };
+  const actAs=async (member,name,args)=>{ const previous=currentId; currentId=member; try { return (await client.rpc(name,args)).data; } finally { currentId=previous; } };
+  await app.loadIdeas();await wait(()=>app.state.notifications.lastRead!==null);
+  openBell();await wait(()=>bellCount()===0);closeBell();
+  check(notificationReads.find(r=>r.member_id==='member-0').last_read_event_id,events.at(-1).id,'opening the bell records the read position');
+  ideas.push({...base,id:'idea-notify',idea_number:6000,title:'Notification test idea',created_by:'member-0'});
+  comments.push({id:'comment-notify-root',idea_id:'idea-notify',author_id:'member-0',body:'Root by Shibo',client_request_id:'00000000-0000-4000-8000-000000000601',
+    created_at:'2026-10-16T16:00:00Z',removed_at:null,removed_by:null,parent_comment_id:null});
+  await app.loadIdeas();
+  await actAs('member-1','create_idea',{p_title:'Yan idea for everyone',p_description:'',p_week_start:'2026-10-12',p_priority:'low'});
+  await actAs('member-2','add_comment',{p_idea_id:'idea-notify',p_body:'Junqi top-level',p_client_request_id:'00000000-0000-4000-8000-000000000602'});
+  await actAs('member-2','reply_to_comment',{p_parent_comment_id:'comment-notify-root',p_body:'Junqi reply',p_client_request_id:'00000000-0000-4000-8000-000000000603'});
+  const yifanJoin=await actAs('member-3','join_idea',{p_idea_id:'idea-notify'});
+  await actAs('member-3','submit_result',{p_idea_id:'idea-notify',p_expected_revision:yifanJoin.revision,p_result:'success',p_notes:null,p_experiment_url:null});
+  await actAs('member-1','add_comment',{p_idea_id:'idea-2',p_body:'Yan on her own idea',p_client_request_id:'00000000-0000-4000-8000-000000000604'});
+  await actAs('member-0','add_comment',{p_idea_id:'idea-notify',p_body:'Shibo own comment',p_client_request_id:'00000000-0000-4000-8000-000000000605'});
+  await app.loadIdeas();
+  await wait(()=>bellCount()==='5');
+  check(text('notifications').includes('Junqi replied to your comment: IDEA-6000 Notification test idea'),true,'new notifications pop up while the page is open');
+  check(bellButton.getAttribute('aria-label'),'Notifications, 5 unread','unread count announced');
+  openBell();
+  check(bellTexts().slice(0,5),['Yifan submitted a Success result on your idea','Yifan joined your idea','Junqi replied to your comment','Junqi commented on your idea','Yan published a new idea'],
+    'relevant notifications newest first; own actions and unrelated comments excluded');
+  check(bellTexts().length > 5 && [...d.querySelectorAll('#bell-list .bell-item')].slice(5).every(li=>!li.classList.contains('unread')),true,'older notifications stay listed as read');
+  check([d.querySelectorAll('#bell-list .bell-item.unread').length,d.querySelector('#bell-list .bell-item .comment-avatar').textContent],[5,'Yi'],'unread items highlighted with the actor avatar');
+  await snapshot('notifications.html');
+  await wait(()=>bellCount()===0);
+  check([readCalls.at(-1).p_last_event_id,notificationReads.find(r=>r.member_id==='member-0').last_read_event_id],[events.at(-1).id,events.at(-1).id],'opening the list marks everything read on the server');
+  [...d.querySelectorAll('#bell-list .bell-item button')].find(b=>b.textContent.includes('replied to your comment')).click();
+  await wait(()=>card('IDEA-6000')?.open && card('IDEA-6000').querySelector('li.comment.flash'));
+  check([bellPanel.hidden,card('IDEA-6000').querySelector('li.comment.flash .markdown-body').textContent.trim()],[true,'Junqi reply'],'a notification opens the idea and highlights the reply');
+  openBell();d.body.click();check(bellPanel.hidden,true,'clicking outside closes the list');
+  openBell();d.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape'}));check([bellPanel.hidden,d.activeElement===bellButton],[true,true],'Escape closes the list and returns focus');
+  await actAs('member-2','add_comment',{p_idea_id:'idea-notify',p_body:'Another comment',p_client_request_id:'00000000-0000-4000-8000-000000000606'});
+  await app.loadIdeas();await wait(()=>bellCount()==='1');
+  notificationReads.find(r=>r.member_id==='member-0').last_read_event_id=events.at(-1).id; // read on another device
+  await app.loadIdeas();await wait(()=>bellCount()===0);
+  check(bellCount(),0,'reading on another device clears the badge here');
+  // A researcher: own idea deleted, own comment removed, own result reopened, and new ideas from others.
+  currentId='member-1';await app.loadCurrentUser(session());await settled();
+  await wait(()=>app.state.notifications.lastRead!==null);
+  openBell();await wait(()=>bellCount()===0);closeBell();
+  const yanIdea=ideas.find(i=>i.title==='Yan idea for everyone');
+  const yanComment=(await client.rpc('add_comment',{p_idea_id:'idea-notify',p_body:'Yan comment',p_client_request_id:'00000000-0000-4000-8000-000000000607'})).data;
+  const yanJoin=(await client.rpc('join_idea',{p_idea_id:'idea-notify'})).data;
+  const yanResult=(await client.rpc('submit_result',{p_idea_id:'idea-notify',p_expected_revision:yanJoin.revision,p_result:'fail',p_notes:null,p_experiment_url:null})).data;
+  await actAs('member-0','remove_comment',{p_comment_id:yanComment.id});
+  await actAs('member-0','reopen_result',{p_idea_id:'idea-notify',p_member_id:'member-1',p_expected_revision:yanResult.revision});
+  await actAs('member-2','create_idea',{p_title:'Junqi idea for everyone',p_description:'',p_week_start:'2026-10-12',p_priority:'medium'});
+  await actAs('member-0','delete_idea',{p_idea_id:yanIdea.id,p_expected_revision:yanIdea.revision});
+  await app.loadIdeas();await wait(()=>bellCount()==='4');
+  openBell();
+  check(bellTexts().slice(0,4),['Shibo deleted your idea','Junqi published a new idea','Shibo reopened your result','Shibo removed your comment'],'researcher notifications');
+  [...d.querySelectorAll('#bell-list .bell-item button')].find(b=>b.textContent.includes('deleted your idea')).click();
+  await wait(()=>d.getElementById('modal').open);
+  check(text('modal-title'),`${'IDEA-'+String(yanIdea.idea_number).padStart(3,'0')} · History`,'a deleted idea opens its activity history');
+  app.closeModal();
+  notificationsFail=true;await app.loadIdeas();await wait(()=>app.state.notifications.unavailable);
+  check(d.getElementById('dashboard').hidden,false,'the dashboard keeps working without the notification table');
+  openBell();check(text('bell-list').includes('unavailable'),true,'the list explains that notifications are unavailable');closeBell();
+  notificationsFail=false;
+  ideas=ideas.filter(i=>i.id!=='idea-notify' && i.title!=='Junqi idea for everyone');
+  comments=comments.filter(c=>c.idea_id!=='idea-notify');participants=participants.filter(p=>p.idea_id!=='idea-notify');
+  currentId='member-0';await app.loadCurrentUser(session());await settled();
+  check([bellPanel.hidden,app.state.notifications.items.every(item=>item.event.actor_id!=='member-0')],[true,true],'switching accounts closes the list and rebuilds it for the new member');
 
   // ---- Conflicts, refresh coalescing, stale and offline states.
   rpcError={message:'Already participating in this idea'};

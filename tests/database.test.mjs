@@ -32,9 +32,9 @@ try {
   await db.initialise(); await db.start();
   const admin = db.getPgClient(); await admin.connect(); clients.push(admin);
   await admin.query(`create role anon nologin; create role authenticated nologin; ${authStub}`);
-  const [schema, exportSQL, dropArchiveSQL, v1Schema, repliesMigration, v20Schema, creatorDeleteMigration, authorDeleteMigration] = await Promise.all([read('../supabase/schema.sql'),read('../supabase/export_v1_backup.sql'),
-    read('../supabase/drop_v1_archive.sql'),read('./fixtures/schema_v1.sql'),read('../supabase/migrations/add_comment_replies.sql'),read('./fixtures/schema_v2_0.sql'),read('../supabase/migrations/allow_creator_delete_untouched_idea.sql'),read('../supabase/migrations/allow_comment_author_delete.sql')]);
-  for (const [name,sql] of [['schema.sql',schema],['export',exportSQL],['archive cleanup',dropArchiveSQL],['replies migration',repliesMigration],['author deletion migration',authorDeleteMigration],['creator deletion migration',creatorDeleteMigration]]) {
+  const [schema, exportSQL, dropArchiveSQL, v1Schema, repliesMigration, v20Schema, creatorDeleteMigration, notifyMigration, authorDeleteMigration] = await Promise.all([read('../supabase/schema.sql'),read('../supabase/export_v1_backup.sql'),
+    read('../supabase/drop_v1_archive.sql'),read('./fixtures/schema_v1.sql'),read('../supabase/migrations/add_comment_replies.sql'),read('./fixtures/schema_v2_0.sql'),read('../supabase/migrations/allow_creator_delete_untouched_idea.sql'),read('../supabase/migrations/add_notification_reads.sql'),read('../supabase/migrations/allow_comment_author_delete.sql')]);
+  for (const [name,sql] of [['schema.sql',schema],['export',exportSQL],['archive cleanup',dropArchiveSQL],['replies migration',repliesMigration],['author deletion migration',authorDeleteMigration],['creator deletion migration',creatorDeleteMigration],['notification migration',notifyMigration]]) {
     check(/```|\\[_*<>]|&(?:lt|gt);/.test(sql),false,`${name} is plain SQL, not escaped Markdown`);
     check(/\bcascade\b/i.test(sql.replace(/--.*$/gm,'')),false,`${name} uses no CASCADE`);
   }
@@ -47,15 +47,15 @@ try {
   const publishedTables = async (client = admin) => (await client.query("select tablename from pg_publication_tables where pubname='supabase_realtime' order by tablename")).rows.map(r => r.tablename);
   check(await publicationFlags(),safeFlags,'publication publishes only INSERT/UPDATE');
   check(await publishedTables(),['idea_events','ideas','profiles'],'publication tables unchanged; participant/comment tables unpublished');
-  check((await admin.query("select count(*)::int n from pg_class where relnamespace='public'::regnamespace and relkind='r' and relrowsecurity")).rows[0].n,5,'RLS on all five tables');
+  check((await admin.query("select count(*)::int n from pg_class where relnamespace='public'::regnamespace and relkind='r' and relrowsecurity")).rows[0].n,6,'RLS on all six tables');
   check((await admin.query("select count(*)::int n from pg_constraint where contype='f' and connamespace='public'::regnamespace and confdeltype='c'")).rows[0].n,0,'no ON DELETE CASCADE foreign keys');
   check((await admin.query("select count(*)::int n from information_schema.columns where table_schema='public' and table_name='ideas' and column_name in ('status','assigned_to','result','notes','experiment_url','completed_at')")).rows[0].n,0,'no single-assignee columns on ideas');
   check((await admin.query("select count(*)::int n from pg_proc where proname in ('claim_idea','release_idea','complete_idea','reopen_idea')")).rows[0].n,0,'no V1 RPCs');
-  const rpcNames = ['create_idea','update_idea','delete_idea','join_idea','leave_idea','submit_result','reopen_result','add_comment','reply_to_comment','remove_comment'];
+  const rpcNames = ['create_idea','update_idea','delete_idea','join_idea','leave_idea','submit_result','reopen_result','add_comment','reply_to_comment','remove_comment','mark_notifications_read'];
   const acl = await admin.query(`select p.proname, has_function_privilege('anon',p.oid,'EXECUTE') as anon,
     has_function_privilege('authenticated',p.oid,'EXECUTE') as member, p.proconfig, p.prosecdef
     from pg_proc p where p.pronamespace='public'::regnamespace and p.proname = any($1)`,[rpcNames]);
-  check(acl.rows.map(r => r.proname).sort(),[...rpcNames].sort(),'ten V2 RPCs');
+  check(acl.rows.map(r => r.proname).sort(),[...rpcNames].sort(),'eleven V2 RPCs');
   for (const fn of acl.rows) check([fn.anon,fn.member,fn.prosecdef,fn.proconfig.includes('search_path=""')],[false,true,true,true],`${fn.proname}: grants and fixed search path`);
   check((await admin.query("select pg_get_function_identity_arguments('public.submit_result'::regproc)")).rows[0].pg_get_function_identity_arguments,
     'p_idea_id uuid, p_expected_revision bigint, p_result text, p_notes text, p_experiment_url text','submit_result has no member parameter');
@@ -77,7 +77,7 @@ try {
   const idea = async id => (await admin.query('select * from public.ideas where id=$1',[id])).rows[0];
   const part = async (id,name) => (await admin.query('select * from public.idea_participants where idea_id=$1 and member_id=$2',[id,users[name]])).rows[0];
   const events = async id => (await admin.query('select * from public.idea_events where idea_id=$1 order by id',[id])).rows;
-  const tables = ['profiles','ideas','idea_participants','idea_comments','idea_events'];
+  const tables = ['profiles','ideas','idea_participants','idea_comments','idea_events','notification_reads'];
 
   // ---- Member-only access.
   for (const table of tables) {
@@ -195,6 +195,31 @@ try {
   check([removed.removed_by,!!removed.removed_at,removed.body],[users.Shibo,true,markdown],'PI removal hides but keeps original text');
   await rejects(() => rpc(shibo,'remove_comment',[comment.id]),/Comment not found/,'already removed');
   check((await events(target)).filter(e => ['commented','comment_removed'].includes(e.event_type)).length,5,'comment history recorded');
+
+  // ---- Notification read state: own row only, never backwards, RPC-only writes.
+  const newestEvent = async () => Number((await admin.query('select coalesce(max(id),0) n from public.idea_events')).rows[0].n);
+  check((await yan.query('select * from public.notification_reads')).rowCount,0,'no read row before first use on a fresh install');
+  const firstRead = await rpc(yan,'mark_notifications_read',[5]);
+  check([firstRead.member_id,Number(firstRead.last_read_event_id)],[users.Yan,5],'member records a read position');
+  check(Number((await rpc(yan,'mark_notifications_read',[2])).last_read_event_id),5,'read position never moves backwards');
+  const newestNow = await newestEvent();
+  check(Number((await rpc(yan,'mark_notifications_read',[newestNow + 1000])).last_read_event_id),newestNow,'read position cannot pass the newest event');
+  await rpc(junqi,'mark_notifications_read',[1]);
+  check((await yan.query('select member_id from public.notification_reads')).rows.map(r => r.member_id),[users.Yan],'members see only their own read state');
+  check((await shibo.query('select member_id from public.notification_reads')).rowCount,0,'even the PI sees no one else\'s read state');
+  await rejects(() => yan.query('update public.notification_reads set last_read_event_id=0'),/permission denied/,'no direct updates');
+  await rejects(() => yan.query('insert into public.notification_reads(member_id) values ($1)',[users.Shibo]),/permission denied/,'no direct inserts');
+  await rejects(() => yan.query('delete from public.notification_reads'),/permission denied/,'no direct deletes');
+  for (const bad of [-1,null]) await rejects(() => rpc(yan,'mark_notifications_read',[bad]),/Invalid notification position/,`invalid position ${bad} rejected`);
+  await rejects(() => rpc(outsider,'mark_notifications_read',[1]),/Permission denied/,'outsider cannot record a read position');
+  await rejects(() => rpc(anon,'mark_notifications_read',[1]),/permission denied/,'anonymous cannot execute');
+  // Two devices of the same member racing: the furthest position wins.
+  const yanPhone = await member('Yan');
+  await yan.query('begin');
+  await rpc(yan,'mark_notifications_read',[newestNow]);
+  const phoneRead = rpc(yanPhone,'mark_notifications_read',[3]);
+  await yan.query('commit');
+  check(Number((await phoneRead).last_read_event_id),newestNow,'a slower device cannot move the position back');
 
   // ---- Threaded replies: same-idea tree, immutability, idempotency, removed parents.
   const threadIdea = await create(shibo,'Threaded discussion');
@@ -705,6 +730,48 @@ try {
   await rpc(liveShibo,'delete_idea',[liveIdea.id,liveIdeaRevision]);
   const liveSnapshot = (await live.query("select previous_state from public.idea_events where idea_id=$1 and event_type='deleted'",[liveIdea.id])).rows[0].previous_state;
   check([liveSnapshot.participants.length,liveSnapshot.comments.length >= 4,liveSnapshot.comments.some(c => c.parent_comment_id)],[2,true,true],'migrated PI deletion snapshots pre-existing results, comments and replies');
+  // ---- Notification migration on a database built exactly like the deployed notifyDb.
+  await admin.query('create database v2_notify');
+  const notifyDb = db.getPgClient('v2_notify'); await notifyDb.connect(); clients.push(notifyDb);
+  await notifyDb.query(authStub);
+  for (const sql of [v20Schema,repliesMigration,authorDeleteMigration,creatorDeleteMigration]) await notifyDb.query(sql);
+  for (const [name,id] of Object.entries(users)) {
+    await notifyDb.query('insert into auth.users values ($1)',[id]);
+    if (name !== 'Outsider') await notifyDb.query('insert into public.profiles(id,display_name,role) values ($1,$2,$3)',[id,name,name === 'Shibo' ? 'pi' : 'researcher']);
+  }
+  const [notifyShibo,notifyYan] = await Promise.all(['Shibo','Yan'].map(name => member(name,'authenticated','v2_notify')));
+  const notifyIdea = await create(notifyShibo,'Deployed idea with history');
+  await rpc(notifyYan,'join_idea',[notifyIdea.id]);
+  await rpc(notifyYan,'add_comment',[notifyIdea.id,'Existing comment',randomUUID()]);
+  const notifyState = async () => (await notifyDb.query(`select
+    (select md5(string_agg(to_jsonb(i)::text, ',' order by i.id)) from public.ideas i) ideas,
+    (select md5(string_agg(to_jsonb(p)::text, ',' order by p.idea_id, p.member_id)) from public.idea_participants p) participants,
+    (select md5(string_agg(to_jsonb(c)::text, ',' order by c.id)) from public.idea_comments c) comments,
+    (select md5(string_agg(to_jsonb(e)::text, ',' order by e.id)) from public.idea_events e) events,
+    (select md5(string_agg(to_jsonb(p)::text, ',' order by p.id)) from public.profiles p) profiles,
+    (select md5(string_agg(u.id::text, ',' order by u.id)) from auth.users u) users,
+    (select json_agg(json_build_object('t',tablename,'p',policyname,'q',qual) order by tablename,policyname) from pg_policies where schemaname='public' and tablename <> 'notification_reads')::text policies,
+    (select string_agg(tablename, ',' order by tablename) from pg_publication_tables where pubname='supabase_realtime') publication`)).rows[0];
+  const beforeNotify = await notifyState(), notifyNewest = Number((await notifyDb.query('select max(id) n from public.idea_events')).rows[0].n);
+  await rejects(() => notifyDb.query(notifyMigration.replace(/commit;\s*$/i,()=>"do $$ begin raise exception 'Injected migration failure'; end; $$; commit;")),/Injected migration failure/,'notification migration is transactional');
+  await notifyDb.query('rollback');
+  check([(await notifyDb.query("select to_regclass('public.notification_reads') t")).rows[0].t,await notifyState()],[null,beforeNotify],'failed notification migration leaves nothing behind');
+  await notifyDb.query(notifyMigration);
+  check(await notifyState(),beforeNotify,'notification migration changes no data, policy or publication');
+  check((await notifyDb.query('select last_read_event_id from public.notification_reads order by member_id')).rows.map(r => Number(r.last_read_event_id)),[notifyNewest,notifyNewest,notifyNewest,notifyNewest],'existing members start with all history read');
+  await rpc(notifyShibo,'add_comment',[notifyIdea.id,'New after migration',randomUUID()]);
+  await notifyDb.query(notifyMigration);
+  check((await notifyDb.query('select last_read_event_id from public.notification_reads order by member_id')).rows.map(r => Number(r.last_read_event_id)),[notifyNewest,notifyNewest,notifyNewest,notifyNewest],'rerun never overwrites read positions');
+  check((await notifyYan.query('select member_id from public.notification_reads')).rows.map(r => r.member_id),[users.Yan],'migrated: own row only');
+  check(Number((await rpc(notifyYan,'mark_notifications_read',[notifyNewest + 1])).last_read_event_id),notifyNewest + 1,'migrated RPC advances the read position');
+  const notificationCatalog = async client => (await client.query(`select
+    (select string_agg(column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default,''), ',' order by ordinal_position) from information_schema.columns where table_schema='public' and table_name='notification_reads') columns,
+    (select string_agg(conname || ':' || pg_get_constraintdef(oid), ' | ' order by conname) from pg_constraint where conrelid='public.notification_reads'::regclass) constraints,
+    (select string_agg(policyname || ':' || cmd || ':' || qual, ' | ' order by policyname) from pg_policies where schemaname='public' and tablename='notification_reads') policies,
+    (select relrowsecurity from pg_class where oid='public.notification_reads'::regclass) rls,
+    (select string_agg(privilege_type, ',' order by privilege_type) from information_schema.role_table_grants where table_name='notification_reads' and grantee in ('anon','authenticated','PUBLIC')) grants,
+    (select md5(pg_get_functiondef('public.mark_notifications_read(bigint)'::regprocedure)) || has_function_privilege('authenticated','public.mark_notifications_read(bigint)','EXECUTE') || has_function_privilege('anon','public.mark_notifications_read(bigint)','EXECUTE')) fn`)).rows[0];
+  check(await notificationCatalog(notifyDb),await notificationCatalog(admin),'migrated and freshly installed notification schemas are identical');
   await admin.query('create database not_v2');
   const notV2 = db.getPgClient('not_v2'); await notV2.connect(); clients.push(notV2);
   await notV2.query(authStub);
@@ -714,8 +781,10 @@ try {
   await notV2.query('rollback');
   await rejects(() => notV2.query(creatorDeleteMigration),/requires the V2 schema/,'creator migration refuses a missing V2 schema');
   await notV2.query('rollback');
+  await rejects(() => notV2.query(notifyMigration),/requires the V2 schema/,'notification migration refuses a missing V2 schema');
+  await notV2.query('rollback');
 
-  console.log(`PASS: ${checks} PostgreSQL checks, including creator/PI idea deletion rules and their migration, threaded replies and their additive migration, concurrent participation, parallel independent results, comment idempotency, publication WAL filtering, parent-before-child deletion races, and the backup-verified single-transaction V1 upgrade. Hosted Supabase was not used.`);
+  console.log(`PASS: ${checks} PostgreSQL checks, including notification read state and its migration, creator/PI idea deletion rules and their migration, threaded replies and their additive migration, concurrent participation, parallel independent results, comment idempotency, publication WAL filtering, parent-before-child deletion races, and the backup-verified single-transaction V1 upgrade. Hosted Supabase was not used.`);
 } finally {
   await Promise.allSettled(clients.map(client => client.end()));
   await db.stop(); await rm(directory,{recursive:true,force:true});

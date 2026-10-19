@@ -698,6 +698,49 @@ grant execute on function public.add_comment(uuid, text, uuid) to authenticated;
 grant execute on function public.remove_comment(uuid) to authenticated;
 grant execute on function public.reply_to_comment(uuid, text, uuid) to authenticated;
 
+-- Notifications are derived in the browser from idea_events; this table only
+-- remembers, per member, the newest event they have seen, so read/unread is the
+-- same on every device. Members can read only their own row and change it only
+-- through mark_notifications_read, which never moves backwards.
+create table if not exists public.notification_reads (
+  member_id uuid primary key references public.profiles(id) on delete restrict,
+  last_read_event_id bigint not null default 0 check (last_read_event_id >= 0),
+  updated_at timestamptz not null default now()
+);
+alter table public.notification_reads enable row level security;
+drop policy if exists members_read_own_notification_reads on public.notification_reads;
+create policy members_read_own_notification_reads on public.notification_reads for select to authenticated
+  using (member_id = auth.uid() and (select tracker_private.member_role()) is not null);
+revoke all on public.notification_reads from public, anon, authenticated;
+grant select on public.notification_reads to authenticated;
+
+-- Marks everything up to p_last_event_id as read for the caller. The position
+-- never moves backwards and never passes the newest existing event.
+create or replace function public.mark_notifications_read(p_last_event_id bigint)
+returns public.notification_reads language plpgsql security definer set search_path = '' as $$
+declare v_row public.notification_reads; v_newest bigint;
+begin
+  perform tracker_private.require_member();
+  if p_last_event_id is null or p_last_event_id < 0 then raise exception 'Invalid notification position'; end if;
+  select coalesce(max(e.id), 0) into v_newest from public.idea_events e;
+  insert into public.notification_reads(member_id, last_read_event_id, updated_at)
+  values (auth.uid(), least(p_last_event_id, v_newest), clock_timestamp())
+  on conflict (member_id) do update
+    set last_read_event_id = greatest(public.notification_reads.last_read_event_id, excluded.last_read_event_id),
+        updated_at = clock_timestamp()
+  returning * into v_row;
+  return v_row;
+end;
+$$;
+revoke all on function public.mark_notifications_read(bigint) from public, anon, authenticated;
+grant execute on function public.mark_notifications_read(bigint) to authenticated;
+
+-- Existing members start with all current history marked as read, so the bell
+-- does not open with the whole history as unread. Never overwrites a row.
+insert into public.notification_reads(member_id, last_read_event_id)
+select p.id, (select coalesce(max(e.id), 0) from public.idea_events e) from public.profiles p
+on conflict (member_id) do nothing;
+
 -- Supabase Postgres Changes does not apply row-level RLS to DELETE events.
 -- Publish only INSERT/UPDATE. Every participant, comment and deletion change
 -- inserts an idea_events row in the same transaction, which Realtime authorizes
