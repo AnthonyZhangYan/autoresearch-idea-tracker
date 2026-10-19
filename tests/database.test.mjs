@@ -32,9 +32,9 @@ try {
   await db.initialise(); await db.start();
   const admin = db.getPgClient(); await admin.connect(); clients.push(admin);
   await admin.query(`create role anon nologin; create role authenticated nologin; ${authStub}`);
-  const [schema, exportSQL, dropArchiveSQL, v1Schema, repliesMigration, v20Schema, creatorDeleteMigration, notifyMigration, authorDeleteMigration] = await Promise.all([read('../supabase/schema.sql'),read('../supabase/export_v1_backup.sql'),
-    read('../supabase/drop_v1_archive.sql'),read('./fixtures/schema_v1.sql'),read('../supabase/migrations/add_comment_replies.sql'),read('./fixtures/schema_v2_0.sql'),read('../supabase/migrations/allow_creator_delete_untouched_idea.sql'),read('../supabase/migrations/add_notification_reads.sql'),read('../supabase/migrations/allow_comment_author_delete.sql')]);
-  for (const [name,sql] of [['schema.sql',schema],['export',exportSQL],['archive cleanup',dropArchiveSQL],['replies migration',repliesMigration],['author deletion migration',authorDeleteMigration],['creator deletion migration',creatorDeleteMigration],['notification migration',notifyMigration]]) {
+  const [schema, exportSQL, dropArchiveSQL, v1Schema, repliesMigration, v20Schema, creatorDeleteMigration, notifyMigration, authorDeleteMigration, resultEditMigration] = await Promise.all([read('../supabase/schema.sql'),read('../supabase/export_v1_backup.sql'),
+    read('../supabase/drop_v1_archive.sql'),read('./fixtures/schema_v1.sql'),read('../supabase/migrations/add_comment_replies.sql'),read('./fixtures/schema_v2_0.sql'),read('../supabase/migrations/allow_creator_delete_untouched_idea.sql'),read('../supabase/migrations/add_notification_reads.sql'),read('../supabase/migrations/allow_comment_author_delete.sql'),read('../supabase/migrations/allow_member_update_result.sql')]);
+  for (const [name,sql] of [['schema.sql',schema],['export',exportSQL],['archive cleanup',dropArchiveSQL],['replies migration',repliesMigration],['author deletion migration',authorDeleteMigration],['creator deletion migration',creatorDeleteMigration],['notification migration',notifyMigration],['result edit migration',resultEditMigration]]) {
     check(/```|\\[_*<>]|&(?:lt|gt);/.test(sql),false,`${name} is plain SQL, not escaped Markdown`);
     check(/\bcascade\b/i.test(sql.replace(/--.*$/gm,'')),false,`${name} uses no CASCADE`);
   }
@@ -150,7 +150,7 @@ try {
   // ---- No cross-user modification.
   await rejects(() => yan.query("update public.idea_participants set result='success' where member_id=$1",[users.Junqi]),/permission denied/,'direct cross-user update denied');
   await rejects(() => rpc(yan,'reopen_result',[target,users.Junqi,junqiRow.revision]),/Permission denied/,'researcher cannot reopen another result');
-  await rejects(() => rpc(yan,'submit_result',[target,yanRow.revision,'fail',null,null]),/Invalid status transition/,'completed result is final for the member');
+  await rejects(() => rpc(yan,'submit_result',[target,yanRow.revision,'success','Yan notes','https://example.org/yan']),/Result unchanged/,'identical resubmission is rejected');
   await rejects(() => rpc(yan,'leave_idea',[target,yanRow.revision]),/Invalid status transition/,'cannot leave after a result');
   await rejects(() => rpc(shibo,'submit_result',[target,1,'success',null,null]),/Participation not found/,'PI cannot submit into another row');
   check((await part(target,'Junqi')).result,'fail','Junqi result untouched by every attempt');
@@ -167,6 +167,16 @@ try {
   check([reopenEvent.event_type,reopenEvent.member_id,reopenEvent.actor_id,reopenEvent.previous_state.result,reopenEvent.previous_state.notes],
     ['result_reopened',users.Yan,users.Shibo,'success','Yan notes'],'previous result preserved in history');
   await rpc(yan,'submit_result',[target,reopened.revision,'fail','Second trial',null]);
+
+  // ---- A member changes their own completed result; history keeps both states.
+  const secondTrial = await part(target,'Yan');
+  const changed = await rpc(yan,'submit_result',[target,secondTrial.revision,'success','Second trial',null]);
+  check([changed.status,changed.result,changed.notes,changed.member_id],['completed','success','Second trial',users.Yan],'member changes own result fail -> success');
+  const changeEvent = (await events(target)).at(-1);
+  check([changeEvent.event_type,changeEvent.actor_id,changeEvent.member_id,changeEvent.previous_state.result,changeEvent.new_state.result],
+    ['participant_updated',users.Yan,users.Yan,'fail','success'],'result change recorded with both states');
+  await rejects(() => rpc(yan,'submit_result',[target,secondTrial.revision,'fail',null,null]),/Participation changed/,'stale revision cannot overwrite a changed result');
+  check((await part(target,'Junqi')).result,'fail','changing Yan result leaves Junqi intact');
 
   // ---- Leave and rejoin.
   const left = await rpc(yifan,'leave_idea',[yanIdea.id,(await part(yanIdea.id,'Yifan')).revision]);
@@ -354,7 +364,7 @@ try {
   check((await admin.query('select (select count(*) from public.idea_participants where idea_id=$1)::int p, (select count(*) from public.idea_comments where idea_id=$1)::int c',[target])).rows[0],{p:0,c:0},'children removed explicitly');
   const deletedEvent = (await events(target)).at(-1);
   check(deletedEvent.event_type,'deleted','deletion event');
-  check(deletedEvent.previous_state.participants.map(p => [p.member_id,p.result]).sort(),[[users.Junqi,'fail'],[users.Yan,'fail']].sort(),'deleted snapshot keeps every participant result');
+  check(deletedEvent.previous_state.participants.map(p => [p.member_id,p.result]).sort(),[[users.Junqi,'fail'],[users.Yan,'success']].sort(),'deleted snapshot keeps every participant result');
   check(deletedEvent.previous_state.comments.length,5,'deleted snapshot keeps every comment, including removed and late ones');
   check(deletedEvent.previous_state.comments.some(c => c.body === markdown && c.removed_by === users.Shibo),true,'removed comment original preserved');
   await rejects(() => rpc(yan,'join_idea',[target]),/Idea not found/,'cannot join a deleted idea');
@@ -716,6 +726,27 @@ try {
   check([liveDeletedReply.removed_by,liveDeletedReply.parent_comment_id],[users.Junqi,liveComment.id],'migrated author deletes own pre-existing reply');
   check((await live.query('select * from public.idea_comments where id=$1',[liveGrandchild.id])).rows[0],liveGrandchild,'pre-existing grandchild stays intact');
   check((await rpc(liveShibo,'remove_comment',[liveGrandchild.id])).removed_by,users.Shibo,'migrated PI still deletes another author reply');
+  // ---- Result-edit migration on the deployed schema + earlier migrations.
+  const resultIdea = await create(liveShibo,'Live result to correct');
+  const resultJoin = await rpc(liveJunqi,'join_idea',[resultIdea.id]);
+  const liveFail = await rpc(liveJunqi,'submit_result',[resultIdea.id,resultJoin.revision,'fail','Deployed fail',null]);
+  await rejects(() => rpc(liveJunqi,'submit_result',[resultIdea.id,liveFail.revision,'success',null,null]),/Invalid status transition/,'deployed RPC: completed results are final');
+  const submitDefinition = async client => (await client.query(`select md5(pg_get_functiondef('public.submit_result(uuid,bigint,text,text,text)'::regprocedure))
+    || has_function_privilege('authenticated','public.submit_result(uuid,bigint,text,text,text)','EXECUTE')
+    || has_function_privilege('anon','public.submit_result(uuid,bigint,text,text,text)','EXECUTE') d`)).rows[0].d;
+  const beforeResultMigration = await dataSnapshot(), oldSubmitDefinition = await submitDefinition(live);
+  await rejects(() => live.query(resultEditMigration.replace(/commit;\s*$/i,()=>"do $$ begin raise exception 'Injected migration failure'; end; $$; commit;")),/Injected migration failure/,'result-edit migration is transactional');
+  await live.query('rollback');
+  check([await submitDefinition(live),await dataSnapshot()],[oldSubmitDefinition,beforeResultMigration],'failed result-edit migration restores the old function and changes no data');
+  await live.query(resultEditMigration);
+  check(await dataSnapshot(),beforeResultMigration,'result-edit migration preserves every row, result and event');
+  check(await policySnapshot(),beforePolicies,'RLS policies unchanged by the result-edit migration');
+  await live.query(resultEditMigration);
+  check(await dataSnapshot(),beforeResultMigration,'repeating the result-edit migration preserves all data');
+  check(await submitDefinition(live),await submitDefinition(admin),'migrated and freshly installed submit_result are identical');
+  const liveSuccess = await rpc(liveJunqi,'submit_result',[resultIdea.id,liveFail.revision,'success','Deployed fail',null]);
+  check([liveSuccess.status,liveSuccess.result,liveSuccess.notes],['completed','success','Deployed fail'],'migrated RPC: member changes a pre-existing result');
+  await rejects(() => rpc(liveYan,'submit_result',[resultIdea.id,liveSuccess.revision,'fail',null,null]),/Participation not found/,'migrated RPC: no one else can change it');
   const afterAuthorDeletes = await dataSnapshot();
   await live.query(authorDeleteMigration);
   check(await dataSnapshot(),afterAuthorDeletes,'rerun preserves removals and history');
@@ -782,6 +813,8 @@ try {
   await rejects(() => notV2.query(creatorDeleteMigration),/requires the V2 schema/,'creator migration refuses a missing V2 schema');
   await notV2.query('rollback');
   await rejects(() => notV2.query(notifyMigration),/requires the V2 schema/,'notification migration refuses a missing V2 schema');
+  await notV2.query('rollback');
+  await rejects(() => notV2.query(resultEditMigration),/requires the V2 schema/,'result-edit migration refuses a missing V2 schema');
   await notV2.query('rollback');
 
   console.log(`PASS: ${checks} PostgreSQL checks, including notification read state and its migration, creator/PI idea deletion rules and their migration, threaded replies and their additive migration, concurrent participation, parallel independent results, comment idempotency, publication WAL filtering, parent-before-child deletion races, and the backup-verified single-transaction V1 upgrade. Hosted Supabase was not used.`);

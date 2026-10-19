@@ -133,11 +133,14 @@ function perform(name,args) {
   if (name==='leave_idea' || name==='submit_result') {
     if (!mine) return fail('Participation not found');
     if (mine.revision!==args.p_expected_revision) return fail('Participation changed. Refresh and try again');
-    if (mine.status!=='testing') return fail('Invalid status transition');
+    const editing = name==='submit_result' && mine.status==='completed';
+    if (mine.status!=='testing' && !editing) return fail('Invalid status transition');
+    const notes = args.p_notes?.trim() || null, url = args.p_experiment_url?.trim() || null;
+    if (editing && mine.result===args.p_result && mine.notes===notes && mine.experiment_url===url) return fail('Result unchanged');
     const before = clone(mine);
-    Object.assign(mine,name==='leave_idea' ? {status:'withdrawn'} : {status:'completed',result:args.p_result,notes:args.p_notes || null,
-      experiment_url:args.p_experiment_url || null,completed_at:'2026-10-16T14:00:00Z'},{revision:mine.revision+1});
-    record(idea,name==='leave_idea' ? 'withdrew' : 'result_submitted',before,mine,currentId); return ok(mine);
+    Object.assign(mine,name==='leave_idea' ? {status:'withdrawn'} : {status:'completed',result:args.p_result,notes,
+      experiment_url:url,completed_at:'2026-10-16T14:00:00Z'},{revision:mine.revision+1});
+    record(idea,name==='leave_idea' ? 'withdrew' : editing ? 'participant_updated' : 'result_submitted',before,mine,currentId); return ok(mine);
   }
   if (name==='reopen_result') {
     const target = participants.find(p=>p.idea_id===idea.id && p.member_id===args.p_member_id);
@@ -307,6 +310,19 @@ try {
   check(calls.at(-1).name,'submit_result','submit result RPC');
   check(Object.keys(calls.at(-1).args),['p_idea_id','p_expected_revision','p_result','p_notes','p_experiment_url'],'no member argument: only the caller row can change');
   check(calls.at(-1).args.p_result,'fail','submitted result');
+
+  // ---- Change my own completed result (fail -> success); the old one stays in history.
+  check(labels(card('IDEA-001')).includes('Edit my result'),true,'own completed row offers result editing');
+  press(card('IDEA-001'),'Edit my result');
+  check([text('modal-title'),d.querySelector('input[value=fail]').checked,d.querySelector('#modal-body textarea').value,d.querySelector('input[type=url]').value],
+    ['Edit my result',true,'Synthetic notes','https://example.org/trial'],'edit dialog starts from the current result');
+  const callsBeforeEdit=calls.length;submit();
+  check([calls.length,d.querySelector('#modal-body .error-text').textContent.includes('Nothing changed')],[callsBeforeEdit,true],'unchanged edit is not sent');
+  d.querySelector('input[value=success]').checked=true;submit();
+  await wait(()=>!app.state.pending && !d.getElementById('modal').open);await settled();
+  check([calls.at(-1).name,calls.at(-1).args.p_result,calls.at(-1).args.p_notes],['submit_result','success','Synthetic notes'],'edited result sent through the same caller-only RPC');
+  check(rowOf('idea-1','member-0').result,'success','own result changed');
+  check(events.at(-1).event_type,'participant_updated','change recorded in history');
   check([...card('IDEA-003').querySelectorAll('.summary-badges .badge')].map(b=>b.textContent),['1 success','1 fail'],'other ideas and members unaffected');
 
   // ---- A second member's view: own result only, no PI controls.
@@ -318,11 +334,12 @@ try {
   check(labels(d.getElementById('ideas')).filter(l=>l==='Edit').length,app.state.ideas.filter(i=>i.created_by==='member-1').length,'edit only own ideas');
   check(labels(d.getElementById('ideas')).includes('Reopen result'),false,'researcher cannot reopen results');
   check(labels(card('IDEA-001')).includes('Submit my result'),false,'cannot submit into another member row');
+  check(labels(card('IDEA-001')).includes('Edit my result'),false,'cannot edit another member result');
   check(labels(card('IDEA-002')).includes('Submit my result'),true,'own testing row actionable');
   press(card('IDEA-002'),'Submit my result');d.querySelector('input[value=success]').checked=true;submit();
   await wait(()=>!app.state.pending && !d.getElementById('modal').open);await settled();
   check(calls.at(-1).args.p_idea_id,'idea-2','Yan submits on her own idea');
-  check([rowOf('idea-1','member-0').result,rowOf('idea-2','member-1').result],['fail','success'],'two members keep independent results');
+  check([rowOf('idea-1','member-0').result,rowOf('idea-2','member-1').result],['success','success'],'two members keep independent results');
   currentId='member-0';await app.loadCurrentUser(session());await settled();
 
   // ---- PI reopens exactly one member's result.
@@ -724,18 +741,19 @@ try {
   await actAs('member-2','add_comment',{p_idea_id:'idea-notify',p_body:'Junqi top-level',p_client_request_id:'00000000-0000-4000-8000-000000000602'});
   await actAs('member-2','reply_to_comment',{p_parent_comment_id:'comment-notify-root',p_body:'Junqi reply',p_client_request_id:'00000000-0000-4000-8000-000000000603'});
   const yifanJoin=await actAs('member-3','join_idea',{p_idea_id:'idea-notify'});
-  await actAs('member-3','submit_result',{p_idea_id:'idea-notify',p_expected_revision:yifanJoin.revision,p_result:'success',p_notes:null,p_experiment_url:null});
+  const yifanResult=await actAs('member-3','submit_result',{p_idea_id:'idea-notify',p_expected_revision:yifanJoin.revision,p_result:'success',p_notes:null,p_experiment_url:null});
+  await actAs('member-3','submit_result',{p_idea_id:'idea-notify',p_expected_revision:yifanResult.revision,p_result:'fail',p_notes:null,p_experiment_url:null});
   await actAs('member-1','add_comment',{p_idea_id:'idea-2',p_body:'Yan on her own idea',p_client_request_id:'00000000-0000-4000-8000-000000000604'});
   await actAs('member-0','add_comment',{p_idea_id:'idea-notify',p_body:'Shibo own comment',p_client_request_id:'00000000-0000-4000-8000-000000000605'});
   await app.loadIdeas();
-  await wait(()=>bellCount()==='5');
-  check(text('notifications').includes('Junqi replied to your comment: IDEA-6000 Notification test idea'),true,'new notifications pop up while the page is open');
-  check(bellButton.getAttribute('aria-label'),'Notifications, 5 unread','unread count announced');
+  await wait(()=>bellCount()==='6');
+  check(text('notifications').includes('Yifan changed their result from Success to Fail on your idea: IDEA-6000 Notification test idea'),true,'new notifications pop up while the page is open');
+  check(bellButton.getAttribute('aria-label'),'Notifications, 6 unread','unread count announced');
   openBell();
-  check(bellTexts().slice(0,5),['Yifan submitted a Success result on your idea','Yifan joined your idea','Junqi replied to your comment','Junqi commented on your idea','Yan published a new idea'],
+  check(bellTexts().slice(0,6),['Yifan changed their result from Success to Fail on your idea','Yifan submitted a Success result on your idea','Yifan joined your idea','Junqi replied to your comment','Junqi commented on your idea','Yan published a new idea'],
     'relevant notifications newest first; own actions and unrelated comments excluded');
-  check(bellTexts().length > 5 && [...d.querySelectorAll('#bell-list .bell-item')].slice(5).every(li=>!li.classList.contains('unread')),true,'older notifications stay listed as read');
-  check([d.querySelectorAll('#bell-list .bell-item.unread').length,d.querySelector('#bell-list .bell-item .comment-avatar').textContent],[5,'Yi'],'unread items highlighted with the actor avatar');
+  check(bellTexts().length > 6 && [...d.querySelectorAll('#bell-list .bell-item')].slice(6).every(li=>!li.classList.contains('unread')),true,'older notifications stay listed as read');
+  check([d.querySelectorAll('#bell-list .bell-item.unread').length,d.querySelector('#bell-list .bell-item .comment-avatar').textContent],[6,'Yi'],'unread items highlighted with the actor avatar');
   await snapshot('notifications.html');
   await wait(()=>bellCount()===0);
   check([readCalls.at(-1).p_last_event_id,notificationReads.find(r=>r.member_id==='member-0').last_read_event_id],[events.at(-1).id,events.at(-1).id],'opening the list marks everything read on the server');
@@ -827,10 +845,10 @@ try {
     await wait(()=>receivers.every(s=>s.participants.some(p=>p.idea_id==='idea-1' && p.member_id==='member-2')));
     check(true,true,'remote join reaches both receivers through the audit INSERT');
     const junqiRow=participants.find(p=>p.idea_id==='idea-1' && p.member_id==='member-2');
-    await remote('member-2','submit_result',{p_idea_id:'idea-1',p_expected_revision:junqiRow.revision,p_result:'success',p_notes:null,p_experiment_url:null});
+    await remote('member-2','submit_result',{p_idea_id:'idea-1',p_expected_revision:junqiRow.revision,p_result:'fail',p_notes:null,p_experiment_url:null});
     deliverEvent();
-    await wait(()=>receivers.every(s=>s.participants.some(p=>p.idea_id==='idea-1' && p.member_id==='member-2' && p.result==='success')));
-    check(receivers.every(s=>s.participants.find(p=>p.idea_id==='idea-1' && p.member_id==='member-0')?.result==='fail'),true,'remote result leaves Shibo result intact');
+    await wait(()=>receivers.every(s=>s.participants.some(p=>p.idea_id==='idea-1' && p.member_id==='member-2' && p.result==='fail')));
+    check(receivers.every(s=>s.participants.find(p=>p.idea_id==='idea-1' && p.member_id==='member-0')?.result==='success'),true,'remote result leaves Shibo result intact');
     await remote('member-2','add_comment',{p_idea_id:'idea-1',p_body:'Remote comment',p_client_request_id:'00000000-0000-4000-8000-000000000099'});
     deliverEvent();
     await wait(()=>receivers.every(s=>s.commentCounts.get('idea-1')===1));

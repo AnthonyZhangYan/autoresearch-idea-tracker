@@ -546,6 +546,8 @@ $$;
 
 -- Records the CALLER's own result. There is deliberately no member parameter:
 -- no one, including the PI, can submit a result into another member's row.
+-- A member may also change their own completed result (e.g. fail -> success);
+-- the audit trigger records it as participant_updated with both states.
 create or replace function public.submit_result(
   p_idea_id uuid, p_expected_revision bigint, p_result text,
   p_notes text default null, p_experiment_url text default null
@@ -557,7 +559,12 @@ begin
     raise exception 'Invalid completion result';
   end if;
   v_row := tracker_private.lock_participation(p_idea_id, auth.uid(), p_expected_revision);
-  if v_row.status <> 'testing' then raise exception 'Invalid status transition'; end if;
+  if v_row.status not in ('testing', 'completed') then raise exception 'Invalid status transition'; end if;
+  if v_row.status = 'completed' and v_row.result = p_result
+    and v_row.notes is not distinct from nullif(btrim(p_notes), '')
+    and v_row.experiment_url is not distinct from nullif(btrim(p_experiment_url), '') then
+    raise exception 'Result unchanged';
+  end if;
   update public.idea_participants set status = 'completed', result = p_result,
     notes = nullif(btrim(p_notes), ''), experiment_url = nullif(btrim(p_experiment_url), ''),
     completed_at = clock_timestamp()

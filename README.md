@@ -44,6 +44,7 @@ GitHub Pages: index.html (HTML + CSS + vanilla JavaScript)
 | `supabase/migrations/add_comment_replies.sql` | Additive, transactional migration that adds threaded comment replies to an existing V2 database (section 9) |
 | `supabase/migrations/allow_comment_author_delete.sql` | Incremental, transactional RPC migration allowing authors to soft-delete their own comments/replies while retaining PI moderation (section 9B) |
 | `supabase/migrations/allow_creator_delete_untouched_idea.sql` | Transactional RPC migration allowing an idea's creator to delete it while nobody has joined or commented (section 9C) |
+| `supabase/migrations/allow_member_update_result.sql` | Transactional RPC migration letting members change their own submitted result (section 9E) |
 | `supabase/migrations/add_notification_reads.sql` | Additive, transactional migration adding the per-member notification read position (`notification_reads`) and `mark_notifications_read` (section 9D) |
 | `tests/fixtures/schema_v2_0.sql` | Frozen copy of the deployed V2 schema before replies, used only to test that migration |
 | `tests/frontend.test.mjs` | Syntax and DOM integration tests using a simulated transport |
@@ -58,7 +59,7 @@ No production Node server, framework, package installation, or build system is r
 - Invitation onboarding: a member opens the Supabase invitation email, lands on **Set Your Password**, chooses their own password through `supabase.auth.updateUser`, and then enters the tracker only if their profile is active. The administrator never sees or assigns member passwords. See section 2.
 - **Ideas:** any active member publishes ideas (Markdown import/editing with live preview). The idea's creator and the PI can edit it, including fixing an incomplete Markdown upload without losing its number or history. The PI can delete any idea. Its creator can delete it only while nobody has joined it (even someone who later left) and no comment exists (even a deleted one). Database-generated identifiers are shown with at least three digits and never truncated (`IDEA-001`, `IDEA-999`, `IDEA-1000`, `IDEA-10000`) and are never reused. Sequence gaps are normal after rolled-back transactions or deletion.
 - **Participation:** any member can **Join** an idea; several members can test the same idea at once. Each participant has their own row and status (`testing`, `completed`, or `withdrawn`). They can **Leave** while testing and rejoin later.
-- **Independent results:** **Submit my result** records the caller's own Success/Fail, notes and HTTP(S) experiment URL. The database function has no member argument, so no one, including the PI, can write a result into another member's row. A submitted result is final for that member. The PI can **Reopen result** for one member, which returns only that member to Testing; the previous result stays in history.
+- **Independent results:** **Submit my result** records the caller's own Success/Fail, notes and HTTP(S) experiment URL. The database function has no member argument, so no one, including the PI, can write a result into another member's row. A member can later **Edit my result** (for example Fail → Success, or corrected notes/link); each change is recorded in history with the previous and new result, and an identical resubmission is refused. The PI can **Reopen result** for one member, which returns only that member to Testing; the previous result stays in history.
 - **Discussion:** every idea has a permanent comment section directly under it on the dashboard. There is no popup. It shows a composer with a Markdown/LaTeX preview, the comments with author avatar, relative time and rendered content, oldest- or newest-first sorting, and "Show earlier comments" paging. Realtime updates never erase a draft, including a draft being typed.
 - **Replies:** every comment has **Reply**. The reply box opens inline under that comment, and replies to replies work to any depth. Threads are drawn with indentation and connector lines. Indentation stops after 4 levels (2 on phones); deeper replies show "↪ name" for their real parent. Replies within a thread are always oldest first, and long threads can be collapsed. Comments and replies keep their author, server timestamp and exact original text, and cannot be edited. The active author can **Delete** their own comments and replies; the active PI can **Delete** any of them: a removed comment shows "Comment removed", its replies stay, and it cannot receive new replies. A retried post after a lost network response cannot create a duplicate.
 - **Notifications:** a bell next to **Log out** shows an unread count and opens a panel of the newest 50 notifications, each with the actor's avatar. Everyone is notified when anyone publishes a new idea. You are also notified when someone replies to your comment, removes your comment or reopens your result, and about joins, leaves (creator only), results, comments, edits and deletion on ideas you created or joined. Your own actions never notify you. While the page is open, new notifications also pop up briefly. Clicking one opens that idea (and scrolls to and highlights the comment or reply); a deleted idea opens its history. Notifications are derived from the existing Activity history; only each member's read position is stored, so read/unread is the same on every device. Opening the panel marks everything as read. If notifications cannot be loaded, the rest of the dashboard keeps working.
@@ -470,7 +471,7 @@ await state.client.rpc('reopen_result', {p_idea_id:testIdea.id, p_member_id:othe
 await state.client.rpc('remove_comment', {p_comment_id:'<ANOTHER_AUTHORS_COMMENT_UUID>'});
 ```
 
-`submit_result` has no member argument: it can only change the caller's own row. A completed result cannot be resubmitted or left; a stale `p_expected_revision` must fail. Do not test authorization only in SQL Editor as `postgres`, because that role bypasses RLS.
+`submit_result` has no member argument: it can only change the caller's own row. A member may change their own completed result, but an identical resubmission fails with `Result unchanged` and a completed result cannot be left; a stale `p_expected_revision` must fail. Do not test authorization only in SQL Editor as `postgres`, because that role bypasses RLS.
 
 ### Invitation onboarding (live Supabase and real email required)
 
@@ -620,7 +621,7 @@ Validation performed on **October 18, 2026** (V2, local only):
     - the migration on the deployed schema plus both earlier migrations is transactional, repeatable, keeps all data and RLS, and matches a fresh install
     - removing the contribution check from either SQL file makes the tests fail
   - **concurrency on separate connections:** a second member's join completes while the first join is still uncommitted; the same member in two sessions gets exactly one row; two members' result submissions run in parallel without blocking
-  - independent results: no member argument on `submit_result`; cross-user direct update and researcher reopen denied; a completed result is final; PI reopen changes one member only and history keeps the old result; leave and rejoin
+  - independent results: no member argument on `submit_result`; cross-user direct update and researcher reopen denied; an identical resubmission is refused; a member changes their own completed result (Fail → Success) with both states in history and stale revisions refused; PI reopen changes one member only and history keeps the old result; leave and rejoin
   - comments: stored verbatim (BOM, CRLF, Markdown, LaTeX); idempotent retry; whitespace-only and over-20 KiB rejected; author/PI removal keeps the original
   - deletion: waits for an in-flight comment, snapshots every participant result and comment (including removed ones), then removes rows explicitly; history stays readable; idea numbers are not reused
   - **parent-before-child lock order, both orders, on separate connections:** for each of `submit_result`, `leave_idea`, `reopen_result` and `remove_comment`, an uncommitted change makes `delete_idea` wait, and the deletion snapshot then contains the committed change. An uncommitted deletion makes the change wait, and the change then fails with "Idea not found". Meanwhile another participant's result, a comment and an idea edit proceed without waiting for an in-flight result. Removing either parent lock from the schema makes these tests fail; this was checked by temporarily breaking the schema
@@ -759,6 +760,21 @@ It does not change ideas, participants, results, comments, history, profiles, Au
 
 New members added later get their read row on first sign-in.
 
+## 9E. Let members change their own result — only after approval
+
+Data-preserving. `supabase/migrations/allow_member_update_result.sql` replaces only `public.submit_result` and re-applies its EXECUTE grant, in one transaction. No table, row, trigger, RLS policy, Realtime setting or history event changes, and it is safe to rerun. It requires the V2 schema and works with or without sections 9–9D.
+
+1. **Review** the migration. A member can still submit only into their own row (there is no member argument). In addition to Testing → Completed, they may now change their own Completed result: Success/Fail, notes or link. A resubmission identical to the stored result is refused with `Result unchanged`. The existing audit trigger records each change as `participant_updated` with the complete previous and new rows, so the earlier result stays in history. The PI's **Reopen result** is unchanged.
+2. **Migrate first.** In the SQL Editor, as `postgres`, run the whole migration file once. Check it with:
+
+   ```sql
+   select pg_get_functiondef('public.submit_result(uuid,bigint,text,text,text)'::regprocedure) like '%Result unchanged%' as updated;
+   ```
+
+   The result must be `true`. The current page keeps working unchanged.
+3. **Then deploy the frontend:** commit and `git push origin main`, wait for GitHub Pages, and hard-reload. Deploying the page first would show **Edit my result**, which the old function refuses with "Invalid status transition"; no data is at risk.
+4. **Verify live** with a disposable idea: submit Fail, use **Edit my result** to change it to Success, and confirm the badge and counts update in a second session without Refresh; History shows "changed their result from Fail to Success" with both states; the idea's creator gets a notification; another member sees no Edit control on your row.
+
 ## Database API reference
 
 Every mutation is a PostgreSQL transaction through one of these RPCs. Every function uses an empty `search_path`, qualified objects, the authenticated caller (`auth.uid()`), and the administrator-managed profile. No RPC accepts a role, and only the PI-only `reopen_result` names another member. Audit triggers write full snapshots in the same transaction, so a rolled-back change creates no historical event.
@@ -770,7 +786,7 @@ Every mutation is a PostgreSQL transaction through one of these RPCs. Every func
 | `delete_idea` | `p_idea_id`, `p_expected_revision` | PI: any idea. Creator: only while it has no participants and no comments. Snapshot of participants, results, comments and replies kept in history |
 | `join_idea` | `p_idea_id` | Any active member; new row, or rejoin after withdrawing |
 | `leave_idea` | `p_idea_id`, `p_expected_revision` (participation) | Caller's own row; Testing → Withdrawn |
-| `submit_result` | `p_idea_id`, `p_expected_revision` (participation), `p_result`, optional `p_notes`, `p_experiment_url` | Caller's own row only; Testing → Completed |
+| `submit_result` | `p_idea_id`, `p_expected_revision` (participation), `p_result`, optional `p_notes`, `p_experiment_url` | Caller's own row only; Testing → Completed, or changes the caller's own Completed result |
 | `reopen_result` | `p_idea_id`, `p_member_id`, `p_expected_revision` (participation) | PI; that member's Completed → Testing |
 | `add_comment` | `p_idea_id`, `p_body`, `p_client_request_id` | Any active member; the same request ID returns the original comment |
 | `reply_to_comment` | `p_parent_comment_id`, `p_body`, `p_client_request_id` | Any active member; the idea comes from the parent, so cross-idea replies are impossible. Not allowed on a removed comment; the same request ID returns the original reply |

@@ -342,6 +342,7 @@ function friendlyError(error) {
   if (message.includes('ideas_description_check')) return 'The Markdown exceeds the database description limit. Use at most 100 KiB of UTF-8 text. If it is within that limit, ask the administrator to apply the updated schema.sql; the old limit was 20,000 characters. Your draft has been kept.';
   if (message.includes('Already participating')) return 'You are already participating in this idea. The latest state has been requested.';
   if (message.includes('Participation changed')) return 'Your participation changed while you were working. Close this dialog, review the latest state, and try again.';
+  if (message.includes('Result unchanged')) return 'Nothing changed. Choose a different result or edit the notes or link.';
   if (message.includes('Participation not found')) return 'This participation no longer exists. The latest state has been requested.';
   if (message.includes('Cannot reply to a removed comment')) return 'This comment was removed, so it can no longer receive replies. Your draft has been kept.';
   if (message.includes('Comment not found')) return 'This comment was already removed. The latest discussion has been requested.';
@@ -907,6 +908,7 @@ function renderParticipant(idea, participant) {
     actions.append(button('Submit my result','primary',() => openResultDialog(idea,participant),true),
       button('Leave','quiet',() => confirmAction('leave',idea,participant),true));
   }
+  if (participant.member_id === state.userId && participant.status === 'completed') actions.append(button('Edit my result','quiet',() => openResultDialog(idea,participant),true));
   if (isPI() && participant.status === 'completed') actions.append(button('Reopen result','quiet',() => confirmAction('reopen',idea,participant),true));
   [...actions.children].forEach(b => { b.dataset.focusKey = `${idea.id}-${participant.member_id}-${b.textContent}`; });
   if (actions.children.length) item.append(actions);
@@ -1366,25 +1368,30 @@ function openIdeaDialog(idea = null) {
   updateConnection(); updatePreview(); title.input.focus();
 }
 function openResultDialog(idea, participant) {
-  const body = openModal('Submit my result'); body.append(node('p','dialog-context',`${ideaNumber(idea.idea_number)} · ${idea.title}`));
+  const editing = participant.status === 'completed';
+  const body = openModal(editing ? 'Edit my result' : 'Submit my result'); body.append(node('p','dialog-context',`${ideaNumber(idea.idea_number)} · ${idea.title}`));
   const form = node('form'), fieldset = node('fieldset'); fieldset.append(node('legend','','Result (required)'));
   const options = node('div','radio-options');
   for (const value of ['success','fail']) {
     const label = node('label','radio-option'), input = document.createElement('input');
-    input.type = 'radio'; input.name = 'result'; input.value = value; input.required = true;
+    input.type = 'radio'; input.name = 'result'; input.value = value; input.required = true; input.checked = participant.result === value;
     label.append(input,node('span','',titleCase(value))); options.append(label);
   }
   fieldset.append(options);
-  const notes = formField('Testing notes (optional)','textarea','',{maxLength:20000});
-  const url = formField('Experiment URL (optional)','url','',{maxLength:2048,hint:'An http:// or https:// link to your experiment or repository.'});
-  form.append(node('p','small','This records your own result only. Other participants keep their results.'),fieldset,notes.wrapper,url.wrapper);
-  const error = formFooter(form,'Submit result'); body.append(form);
+  const notes = formField('Testing notes (optional)','textarea',participant.notes,{maxLength:20000});
+  const url = formField('Experiment URL (optional)','url',participant.experiment_url,{maxLength:2048,hint:'An http:// or https:// link to your experiment or repository.'});
+  form.append(node('p','small',editing ? 'This changes your own result only. Your previous result stays in activity history.' : 'This records your own result only. Other participants keep their results.'),fieldset,notes.wrapper,url.wrapper);
+  const error = formFooter(form,editing ? 'Save result' : 'Submit result'); body.append(form);
   form.addEventListener('submit',event => {
     event.preventDefault(); error.textContent = '';
     if (url.input.value.trim() && !safeURL(url.input.value.trim())) { error.textContent = 'Use a valid HTTP(S) experiment URL.'; url.input.focus(); return; }
-    void submitResult(participant,{p_result:new FormData(form).get('result'),p_notes:notes.input.value,p_experiment_url:url.input.value.trim()},error);
+    const args = {p_result:new FormData(form).get('result'),p_notes:notes.input.value,p_experiment_url:url.input.value.trim()};
+    if (editing && args.p_result === participant.result && (args.p_notes.trim() || null) === (participant.notes || null) && (args.p_experiment_url || null) === (participant.experiment_url || null)) {
+      error.textContent = 'Nothing changed. Choose a different result or edit the notes or link.'; return;
+    }
+    void submitResult(participant,args,error);
   });
-  updateConnection(); options.querySelector('input').focus();
+  updateConnection(); (options.querySelector('input:checked') || options.querySelector('input')).focus();
 }
 function confirmAction(action,idea,participant = null) {
   const who = participant ? memberName(participant.member_id) : '';
@@ -1410,7 +1417,10 @@ function updateIdea(idea,args,error) { return mutate('update_idea',{...versionAr
 function deleteIdea(idea,error) { return mutate('delete_idea',versionArgs(idea),'Idea deleted. Its results and discussion remain in activity history.',error); }
 function joinIdea(idea) { return mutate('join_idea',{p_idea_id:idea.id},`You joined ${ideaNumber(idea.idea_number)}.`); }
 function leaveIdea(participant,error) { return mutate('leave_idea',participationArgs(participant),'You left the idea. You can rejoin at any time.',error); }
-function submitResult(participant,args,error) { return mutate('submit_result',{...participationArgs(participant),...args},'Your result was submitted.',error); }
+function submitResult(participant,args,error) {
+  return mutate('submit_result',{...participationArgs(participant),...args},
+    participant.status === 'completed' ? 'Your result was updated. The previous result remains in history.' : 'Your result was submitted.',error);
+}
 function reopenResult(participant,error) {
   return mutate('reopen_result',{p_idea_id:participant.idea_id,p_member_id:participant.member_id,p_expected_revision:participant.revision},
     `${memberName(participant.member_id)}’s result was reopened. The previous result remains in history.`,error);
@@ -1492,7 +1502,7 @@ const NOTIFICATION_WINDOW = 200, NOTIFICATION_LIST = 50;
 const NOTIFICATION_COLUMNS = ['id','idea_id','idea_number','actor_id','member_id','event_type','created_at',
   'title:new_state->>title','old_title:previous_state->>title','new_creator:new_state->>created_by','old_creator:previous_state->>created_by',
   'comment_id:new_state->>id','parent_id:new_state->>parent_comment_id','comment_author:previous_state->>author_id',
-  'result:new_state->>result','old_participants:previous_state->participants'].join(',');
+  'result:new_state->>result','old_result:previous_state->>result','old_participants:previous_state->participants'].join(',');
 const freshNotifications = () => ({items:[],lastRead:null,newest:0,seenMax:null,panelLastRead:0,open:false,unavailable:false});
 function describeNotification(event) {
   const me = state.userId;
@@ -1509,6 +1519,9 @@ function describeNotification(event) {
     case 'joined': case 'rejoined': return mine ? `${actor} joined your idea` : joined ? `${actor} also joined an idea you joined` : null;
     case 'withdrew': return mine ? `${actor} left your idea` : null;
     case 'result_submitted': return involved ? `${actor} submitted a ${titleCase(event.result)} result on ${whose}` : null;
+    case 'participant_updated': if (!event.result || !event.old_result || !involved) return null;
+      return event.result === event.old_result ? `${actor} updated their ${titleCase(event.result)} result on ${whose}` :
+        `${actor} changed their result from ${titleCase(event.old_result)} to ${titleCase(event.result)} on ${whose}`;
     case 'result_reopened': return event.member_id === me ? `${actor} reopened your result` :
       mine ? `${actor} reopened ${memberName(event.member_id)}’s result on your idea` : null;
     case 'commented': {
@@ -1621,15 +1634,17 @@ function renderEvent(event) {
   const actor = event.actor_id ? memberName(event.actor_id) : 'Administrator';
   const repliedTo = event.event_type === 'commented' && after?.parent_comment_id ?
     (state.commentsByIdea.get(event.idea_id) || []).find(c => c.id === after.parent_comment_id) : null;
+  const resultEdit = event.event_type === 'participant_updated' && before?.result && after?.result;
   const verb = event.event_type === 'result_reopened' ? `reopened ${memberName(event.member_id)}’s result` :
+    resultEdit ? (before.result === after.result ? 'updated their result' : `changed their result from ${titleCase(before.result)} to ${titleCase(after.result)}`) :
     event.event_type === 'commented' && after?.parent_comment_id ? `replied to ${repliedTo ? `${memberName(repliedTo.author_id)}’s` : 'a'} comment` :
     EVENT_VERBS[event.event_type] || event.event_type;
   item.append(node('strong','',`${ideaNumber(event.idea_number)} · ${actor} ${verb}.`));
   const time = node('time','',dateText(event.created_at,true)); time.dateTime = event.created_at; item.append(time);
   const title = (after || before)?.title || state.ideas.find(idea => idea.id === event.idea_id)?.title;
   if (title) item.append(node('p','',title));
-  // A submitted result, or the result that was reopened, stays readable here.
-  const result = event.event_type === 'result_submitted' ? after : event.event_type === 'result_reopened' ? before : null;
+  // A submitted or changed result, or the result that was reopened, stays readable here.
+  const result = event.event_type === 'result_submitted' || resultEdit ? after : event.event_type === 'result_reopened' ? before : null;
   if (result?.result) {
     item.append(badge(result.result),node('p','notes',`${memberName(result.member_id)} · ${dateText(result.completed_at,true)}\n${result.notes || 'No testing notes provided.'}`));
     if (result.experiment_url) item.append(experimentLink(result.experiment_url));
