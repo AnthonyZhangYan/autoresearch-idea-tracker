@@ -41,6 +41,7 @@
       <form id="login-form">
         <label class="field">Email<input id="email" type="email" autocomplete="username" required maxlength="254" placeholder="Your lab account email"></label>
         <label class="field">Password<input id="password" type="password" autocomplete="current-password" required></label>
+        <label class="check"><input id="remember-login" type="checkbox" checked> Keep me signed in</label>
         <p id="login-error" class="error-text" role="alert"></p>
         <button id="login-submit" type="submit" class="primary" disabled>Checking session…</button>
       </form>
@@ -92,6 +93,7 @@ const utf8Bytes = text => new TextEncoder().encode(text).byteLength;
 const MIN_PASSWORD_LENGTH = 8; // Keep at or above the Supabase Auth minimum password length.
 const MAX_PASSWORD_BYTES = 72; // Supabase Auth rejects longer passwords.
 const ONBOARDING_KEY = 'autoresearch.pendingOnboarding'; // Stores an Auth user ID only, never a password.
+const REMEMBER_KEY = 'autoresearch.rememberLogin'; // '0' or '1': the last "Keep me signed in" choice.
 const INVITATION_INVALID = 'This invitation link has expired or is invalid. Please contact the administrator for a new invitation.';
 const NOT_AUTHORIZED = 'Your account has been created, but access to this research workspace has not yet been authorized. Please contact the administrator.';
 const AUTH_CALLBACK_KEYS = ['access_token','refresh_token','expires_at','expires_in','token_type','provider_token','provider_refresh_token','token_hash','type','code','sb_flow_id','error','error_code','error_description','sb'];
@@ -368,12 +370,37 @@ async function boundedFetch(input, options = {}) {
   try { return await fetch(input, {...options, signal:controller.signal}); }
   finally { clearTimeout(timeout); options.signal?.removeEventListener('abort', abort); }
 }
+// Where the SDK keeps the Auth session (tokens only, never passwords). "Keep me
+// signed in" uses localStorage, which survives closing the browser; otherwise
+// sessionStorage, which the browser discards with the window. Token refreshes
+// stay in whichever store already holds the session; a sign-in decides anew.
+let rememberLogin = null;
+function browserStore(name) { try { return window[name] || null; } catch { return null; } }
+const authStorage = {
+  getItem(key) {
+    for (const name of ['sessionStorage','localStorage']) {
+      try { const value = browserStore(name)?.getItem(key); if (value !== null && value !== undefined) return value; } catch {}
+    }
+    return null;
+  },
+  setItem(key,value) {
+    let inSession = false;
+    try { inSession = browserStore('sessionStorage')?.getItem(key) != null; } catch {}
+    const remember = rememberLogin ?? !inSession;
+    try { browserStore(remember ? 'sessionStorage' : 'localStorage')?.removeItem(key); } catch {}
+    try { browserStore(remember ? 'localStorage' : 'sessionStorage')?.setItem(key,value); } catch {}
+  },
+  removeItem(key) {
+    for (const name of ['sessionStorage','localStorage']) try { browserStore(name)?.removeItem(key); } catch {}
+  }
+};
+function savedRememberChoice() { try { return window.localStorage.getItem(REMEMBER_KEY) !== '0'; } catch { return true; } }
 function initializeSupabase() {
   if (!window.supabase) throw new Error('SDK unavailable');
   // detectSessionInUrl stays off: invitation callbacks are handled exactly once
   // by acceptInvitation(), never also by the SDK.
   return window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-    auth:{persistSession:true, autoRefreshToken:true, detectSessionInUrl:false},
+    auth:{persistSession:true, autoRefreshToken:true, detectSessionInUrl:false, storage:authStorage},
     global:{fetch:boundedFetch}, realtime:{params:{eventsPerSecond:5}}
   });
 }
@@ -1621,6 +1648,8 @@ function renderEvent(event) {
 function bindInterface() {
   $('login-form').addEventListener('submit',async event => {
     event.preventDefault(); $('login-error').textContent = ''; $('login-submit').disabled = true; $('login-submit').textContent = 'Signing in…';
+    rememberLogin = $('remember-login').checked;
+    try { window.localStorage.setItem(REMEMBER_KEY,rememberLogin ? '1' : '0'); } catch {}
     try {
       const {error} = await state.client.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});
       if (error) throw error;
@@ -1665,6 +1694,7 @@ async function initializeApp() {
   bindInterface();
   const callback = readAuthCallback();
   try {
+    $('remember-login').checked = savedRememberChoice();
     state.client = initializeSupabase();
     // While an invitation callback is being accepted, ignore Auth events so the
     // member is never routed to the login page or a previous account's workspace.

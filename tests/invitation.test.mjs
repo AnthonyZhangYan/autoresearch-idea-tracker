@@ -410,11 +410,15 @@ try {
   const b64url = value => Buffer.from(JSON.stringify(value)).toString('base64url');
   const fakeJWT = user => `${b64url({alg:'HS256',typ:'JWT'})}.${b64url({sub:user.id,aud:'authenticated',role:'authenticated',exp:Math.floor(Date.now()/1000)+3600})}.synthetic-signature`;
   const authUser = user => ({...user,aud:'authenticated',role:'authenticated',invited_at:'2026-10-16T00:00:00Z',app_metadata:{},user_metadata:{},created_at:'2026-10-16T00:00:00Z'});
-  async function bootRealSDK(path,{profiles = memberProfiles,user = yan,respond = () => null} = {}) {
+  async function bootRealSDK(path,{profiles = memberProfiles,user = yan,respond = () => null,local = {},session = {}} = {}) {
     const dom = new JSDOM(html,{url:`${ORIGIN}${path}`,runScripts:'outside-only',pretendToBeVisual:true});
     const w = dom.window, requests = [];
     Object.assign(w,{TextEncoder,TextDecoder,Headers,Request,Response});
     w.WebSocket = class { constructor() { throw new Error('Network disabled in tests'); } };
+    // Browser storage carried over from an earlier page: localStorage survives
+    // closing the browser, sessionStorage only a reload of the same window.
+    for (const [key,value] of Object.entries(local)) w.localStorage.setItem(key,value);
+    for (const [key,value] of Object.entries(session)) w.sessionStorage.setItem(key,value);
     w.HTMLDialogElement.prototype.showModal = function(){this.open = true;};
     w.HTMLDialogElement.prototype.close = function(){this.open = false;};
     const accessToken = fakeJWT(user);
@@ -429,12 +433,13 @@ try {
       if (custom) return json(custom.body,custom.status);
       if (request.path === '/auth/v1/verify') return json({access_token:accessToken,token_type:'bearer',expires_in:3600,expires_at:Math.floor(Date.now()/1000)+3600,refresh_token:'synthetic-refresh',user:authUser(user)});
       if (request.path === '/auth/v1/user') return json(authUser(user));
+      if (request.path === '/auth/v1/token') return json({access_token:accessToken,token_type:'bearer',expires_in:3600,expires_at:Math.floor(Date.now()/1000)+3600,refresh_token:'synthetic-refresh',user:authUser(user)});
       if (request.path === '/auth/v1/logout') return json(null,204);
       if (request.path === '/rest/v1/profiles') return json(profiles.filter(p => url.searchParams.get('id') === `eq.${p.id}`));
       throw new Error(`Unexpected request ${request.method} ${request.path}`);
     };
     w.eval(sdkSource.toString());
-    w.eval(script + '\nwindow.__app = {state};');
+    w.eval(script + '\nwindow.__app = {state,authStorage};');
     const page = {w,requests,accessToken,app:w.__app,$:id => w.document.getElementById(id),text:id => w.document.getElementById(id).textContent,
       visible:id => !w.document.getElementById(id).hidden,
       async wait(condition,label) { for (let n = 0; n < 400; n++) { if (condition()) return; await new Promise(r => setTimeout(r,5)); } throw new Error(`Timed out waiting for ${label}`); },
@@ -496,6 +501,48 @@ try {
     await settle(page);
     check(page.text('onboarding-message'),'Unable to reach the sign-in service. Check your connection and try again.','real SDK: network failure is retryable');
     check(page.visible('retry-onboarding'),true,'real SDK: retry offered');
+  }
+  // "Keep me signed in" with the real SDK: checked keeps the session in
+  // localStorage (survives closing the browser); unchecked keeps it in
+  // sessionStorage, which the browser discards with the window.
+  {
+    const AUTH_KEY = 'sb-kgfybebpxpdkiouofyow-auth-token', REMEMBER_KEY = 'autoresearch.rememberLogin';
+    const where = page => [page.w.sessionStorage.getItem(AUTH_KEY) !== null,page.w.localStorage.getItem(AUTH_KEY) !== null];
+    const copy = store => Object.fromEntries(Object.keys(store).map(key => [key,store.getItem(key)]));
+    // An empty allowlist stops at the access page, which proves a session without opening Realtime.
+    const signIn = async (page,remember) => {
+      await page.wait(() => !page.$('login-submit').disabled,'real SDK login ready');
+      page.$('remember-login').checked = remember;
+      page.$('email').value = yan.email; page.$('password').value = PASSWORD;
+      page.$('login-form').dispatchEvent(new page.w.Event('submit',{bubbles:true,cancelable:true}));
+      await page.wait(() => page.visible('access-view'),'real SDK signed in');
+    };
+    const temporary = await bootRealSDK(BASE,{profiles:[]});
+    await temporary.wait(() => !temporary.$('login-submit').disabled,'real SDK login ready');
+    check(temporary.$('remember-login').checked,true,'Keep me signed in is checked by default');
+    await signIn(temporary,false);
+    check(where(temporary),[true,false],'unchecked: session kept only in sessionStorage');
+    check(temporary.w.localStorage.getItem(REMEMBER_KEY),'0','unchecked choice remembered');
+    check(storedText(temporary).includes(PASSWORD),false,'remember choice: password never stored');
+    const reloaded = await bootRealSDK(BASE,{profiles:[],local:copy(temporary.w.localStorage),session:copy(temporary.w.sessionStorage)});
+    await reloaded.wait(() => reloaded.visible('access-view'),'reload keeps the temporary session');
+    reloaded.app.authStorage.setItem(AUTH_KEY,reloaded.w.sessionStorage.getItem(AUTH_KEY));
+    check(where(reloaded),[true,false],'unchecked: reloads and token refreshes stay in sessionStorage');
+    const reopened = await bootRealSDK(BASE,{profiles:[],local:copy(temporary.w.localStorage)});
+    await reopened.wait(() => !reopened.$('login-submit').disabled,'login after reopening the browser');
+    check([reopened.visible('login-view'),reopened.visible('access-view')],[true,false],'unchecked: signed out after the browser is closed');
+    check(reopened.$('remember-login').checked,false,'checkbox restores the last choice');
+    await signIn(reopened,true);
+    check(where(reopened),[false,true],'checked: session kept in localStorage');
+    check(reopened.w.localStorage.getItem(REMEMBER_KEY),'1','checked choice remembered');
+    const nextDay = await bootRealSDK(BASE,{profiles:[],local:copy(reopened.w.localStorage)});
+    await nextDay.wait(() => nextDay.visible('access-view'),'remembered session restored');
+    check(nextDay.visible('login-view'),false,'checked: still signed in after the browser is closed');
+    nextDay.$('access-logout').click();
+    await nextDay.wait(() => nextDay.visible('login-view'),'logout');
+    check(where(nextDay),[false,false],'logout removes the session from both stores');
+    await signIn(nextDay,false);
+    check(where(nextDay),[true,false],'the next sign-in in the same window follows the new choice');
   }
 
   console.log(`PASS: ${checks} invitation/login checks, including the actual pinned Supabase SDK with local fetch responses. No hosted invitation email or live Supabase Auth was tested.`);

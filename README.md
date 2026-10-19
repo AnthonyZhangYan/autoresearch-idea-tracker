@@ -54,7 +54,7 @@ No production Node server, framework, package installation, or build system is r
 
 ## Implemented workflow
 
-- Individual login/logout, restored sessions, explicit allowlist lookup, PI-aware controls.
+- Individual login/logout, restored sessions, explicit allowlist lookup, PI-aware controls. **Keep me signed in** (checked by default, last choice remembered) keeps the Auth session in localStorage, so it survives closing the browser; unchecked, the session lives in sessionStorage and ends when the browser window is closed (each new tab then signs in separately). Only Auth tokens are stored, never passwords; Log out removes the session from both stores.
 - Invitation onboarding: a member opens the Supabase invitation email, lands on **Set Your Password**, chooses their own password through `supabase.auth.updateUser`, and then enters the tracker only if their profile is active. The administrator never sees or assigns member passwords. See section 2.
 - **Ideas:** any active member publishes ideas (Markdown import/editing with live preview). The idea's creator and the PI can edit it, including fixing an incomplete Markdown upload without losing its number or history. The PI can delete any idea. Its creator can delete it only while nobody has joined it (even someone who later left) and no comment exists (even a deleted one). Database-generated identifiers are shown with at least three digits and never truncated (`IDEA-001`, `IDEA-999`, `IDEA-1000`, `IDEA-10000`) and are never reused. Sequence gaps are normal after rolled-back transactions or deletion.
 - **Participation:** any member can **Join** an idea; several members can test the same idea at once. Each participant has their own row and status (`testing`, `completed`, or `withdrawn`). They can **Leave** while testing and rejoin later.
@@ -650,7 +650,7 @@ Validation performed on **October 18, 2026** (V2, local only):
   - history for every V2 event type
   - two receiving DOM instances refreshing on simulated `idea_events` INSERTs (remote join, result, comment and deletion) with polling disabled
   - all earlier Markdown, math, sanitizer, offline, stale and session-isolation checks
-- **147 invitation/login checks passed** unchanged against the V2 page, including the actual pinned SDK 2.118.0 with local fetch responses.
+- **159 invitation/login checks passed** against the V2 page, including the actual pinned SDK 2.118.0 with local fetch responses. With the real SDK, Keep me signed in is checked by default; unchecked stores the session only in sessionStorage (it survives a reload and token refresh there, and is gone after the browser is closed); checked stores it in localStorage and survives; the last choice is restored; logout clears both stores; no password is stored. Ignoring the checkbox makes these tests fail.
 - The V2 dashboard and discussion dialog were rendered as static snapshots in headless Chrome at desktop width and match the dark theme. Phone widths were not reliably verified (headless window sizing also crops the unchanged login page).
 
 None of this exercises hosted Supabase (gateway, Auth, Realtime WebSocket authorization), email delivery, or GitHub Pages. No production data was read or changed.
