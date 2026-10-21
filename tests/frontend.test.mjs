@@ -998,14 +998,16 @@ try {
   for (const [badFile,pattern] of [
     [new w.File(['# Title'],'not.txt',{type:'text/plain'}),/\.md/],
     [new w.File(['# Title'],'not.md',{type:'text/html'}),/file type/],
-    [new w.File(['x'.repeat(102401)],'large.md'),/100 KiB/],
+    [new w.File(['x'.repeat(1048577)],'large.md'),/1 MiB/],
     [new w.File([new Uint8Array([0xff,0xfe])],'invalid.md'),/UTF-8/],
     [new w.File(['a\0b'],'null.md'),/null character/]
   ]) { await assert.rejects(()=>app.readMarkdownFile(badFile),pattern);checks++; }
   const longSource='# Long research idea\n\n'+'é'.repeat(25000);
   check((await app.readMarkdownFile(new w.File([longSource],'long.md'))).source,longSource,'document beyond old character limit preserved');
-  await assert.rejects(()=>app.readMarkdownFile(new w.File(['😀'.repeat(25601)],'unicode.md')),/100 KiB/);checks++;
-  check((await app.readMarkdownFile(new w.File(['x'.repeat(102400)],'boundary.md'))).source.length,102400,'exact byte limit accepted');
+  const beyondOld='# Large research idea\n\n'+'é $x_i$ '.repeat(60000);check(Buffer.byteLength(beyondOld)>102400,true,'fixture exceeds the old 100 KiB limit');
+  check((await app.readMarkdownFile(new w.File([beyondOld],'large-ok.md'))).source,beyondOld,'document beyond the old 100 KiB limit preserved');
+  await assert.rejects(()=>app.readMarkdownFile(new w.File(['😀'.repeat(262145)],'unicode.md')),/1 MiB/);checks++;
+  check((await app.readMarkdownFile(new w.File(['x'.repeat(1048576)],'boundary.md'))).source.length,1048576,'exact 1 MiB byte limit accepted');
 
   w.confirm=()=>true;
   const importIntoForm=async files=>{
@@ -1044,11 +1046,11 @@ try {
   app.openIdeaDialog();await importIntoForm([new w.File([longSource],'long.md')]);
   rpcError={code:'23514',message:'violates check constraint "ideas_description_check"'};submit();await wait(()=>!app.state.pending);
   check(d.getElementById('modal').open,true,'old database constraint keeps draft open');
-  check(d.querySelector('#modal-body .error-text').textContent.includes('updated schema.sql'),true,'old schema error is actionable');
+  check(d.querySelector('#modal-body .error-text').textContent.includes('raise_description_limit.sql'),true,'old schema error names the migration');
   check(d.querySelector('#modal-body textarea').value,longSource,'old schema error never truncates draft');rpcError=null;
-  const manual=d.querySelector('#modal-body textarea');manual.value='x'.repeat(102401);manual.dispatchEvent(new w.Event('input'));
+  const manual=d.querySelector('#modal-body textarea');manual.value='x'.repeat(1048577);manual.dispatchEvent(new w.Event('input'));
   const beforeOversize=calls.length;submit();check(calls.length,beforeOversize,'oversized manual draft cannot submit');
-  check(manual.value.length,102401,'oversized manual draft not truncated');app.closeModal();
+  check(manual.value.length,1048577,'oversized manual draft not truncated');app.closeModal();
 
   let releaseLate;delayRead=new Promise(resolve=>releaseLate=resolve);const late=app.loadIdeas();
   await app.loadCurrentUser(null);releaseLate();await late;

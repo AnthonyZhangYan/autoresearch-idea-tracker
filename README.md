@@ -45,6 +45,7 @@ GitHub Pages: index.html (HTML + CSS + vanilla JavaScript)
 | `supabase/migrations/allow_comment_author_delete.sql` | Incremental, transactional RPC migration allowing authors to soft-delete their own comments/replies while retaining PI moderation (section 9B) |
 | `supabase/migrations/allow_creator_delete_untouched_idea.sql` | Transactional RPC migration allowing an idea's creator to delete it while nobody has joined or commented (section 9C) |
 | `supabase/migrations/allow_member_update_result.sql` | Transactional RPC migration letting members change their own submitted result (section 9E) |
+| `supabase/migrations/raise_description_limit.sql` | Transactional migration raising the idea description limit from 100 KiB to 1 MiB (section 9F) |
 | `supabase/migrations/add_notification_reads.sql` | Additive, transactional migration adding the per-member notification read position (`notification_reads`) and `mark_notifications_read` (section 9D) |
 | `tests/fixtures/schema_v2_0.sql` | Frozen copy of the deployed V2 schema before replies, used only to test that migration |
 | `tests/frontend.test.mjs` | Syntax and DOM integration tests using a simulated transport |
@@ -74,7 +75,7 @@ No production Node server, framework, package installation, or build system is r
 
 Any member can create an idea manually or choose **Import one .md file** in the Publish idea dialog. A file always represents **one** idea. Multiple headings, sections, code blocks, or horizontal rules are never split into separate ideas. There is no bulk import. Comments use the same Markdown, LaTeX and sanitization pipeline, with a 20 KiB limit per comment.
 
-1. Open **Publish idea**, then choose one local UTF-8 `.md` file, at most **100 KiB (102,400 bytes)**. A file stays on the computer until its text is submitted with the form; there is no file upload endpoint or Supabase Storage bucket.
+1. Open **Publish idea**, then choose one local UTF-8 `.md` file, at most **1 MiB (1,048,576 bytes)**. A file stays on the computer until its text is submitted with the form; there is no file upload endpoint or Supabase Storage bucket.
 2. The first Markdown H1 supplies the suggested title. Both `# Title` and Setext H1 (`Title` followed by `=====`) work; heading-like lines in code blocks are ignored. If no H1 exists, the filename without `.md` is used. A suggestion over 200 characters is shortened with a notice, while the full source stays unchanged.
 3. Edit the suggested title, Markdown, Monday date, or priority as needed. The source editor and **Live preview** appear side by side on desktop and stack on narrow screens. Preview updates shortly after typing.
 4. Review the preview, then explicitly click **Publish idea**. **Choosing a file never publishes or creates a database row.** Importing into a nonempty draft asks before replacing that draft. Cancel leaves the database unchanged.
@@ -503,7 +504,7 @@ Use a real address you control first, ideally your own, before inviting the othe
 2. Change the suggested title, publish once, and verify exactly one new idea appears for a second authorized member. Expand it and check the table, code and formulas. Reload and compare `ideas.description` with the original source using an authenticated client; it must be unchanged if the source was not edited.
 3. Import a file without H1; confirm filename fallback. Check a fenced `# Heading` is ignored. Cancel and confirm no database change.
 4. Edit a published idea's Markdown as its creator and confirm the live preview and other session update. Check History retains the prior complete source. Another researcher must be unable to edit it via RPC.
-5. Publish a document longer than 20,000 characters but below 100 KiB. Try a file/manual draft above 100 KiB and invalid UTF-8; expect rejection with no truncation or unintended publication.
+5. Publish a document larger than 100 KiB but below 1 MiB. Try a file/manual draft above 1 MiB and invalid UTF-8; expect rejection with no truncation or unintended publication.
 6. Check raw `<script>`/event-handler HTML, `javascript:` links, and KaTeX HTML/URL commands remain inert, both in idea descriptions and in comments. Code containing `$...$` stays literal. Repeat editor/card/discussion checks on a narrow screen.
 
 ### Concurrent participation and live synchronization
@@ -589,7 +590,8 @@ If port 55439 is occupied, set `TRACKER_TEST_PORT` to another free port. You can
 
 Validation performed on **October 18, 2026** (V2, local only):
 
-- **366 PostgreSQL checks passed** on a temporary local cluster, using the actual `schema.sql`, replies, author-delete, creator-delete and notification migrations, export query, archive cleanup script and backup verifier:
+- **397 PostgreSQL checks passed** on a temporary local cluster, using the actual `schema.sql`, replies, author-delete, creator-delete and notification migrations, export query, archive cleanup script and backup verifier:
+  - description limit (section 9F) on the deployed schema plus every earlier migration: the old 100 KiB limit is in force before; the migration is transactional, repeatable and keeps all data and RLS; afterwards exactly 1,048,576 bytes of multibyte text are stored verbatim, one byte more is refused, an existing idea can grow past 100 KiB with full history, and the constraint matches a fresh install. Changing the limit in the migration alone makes these tests fail
   - notification read state: members see and advance only their own row; the position never moves backwards and cannot pass the newest event; direct insert/update/delete, invalid positions, outsiders and anonymous callers are refused; two devices racing keep the furthest position
   - the notification migration on a database built from the deployed chain (V2 + replies + author delete + creator delete): transactional, changes no data, RLS policy or Realtime publication, starts existing members with all history read, a rerun never resets read positions, refuses to run without V2, and the result is identical to a fresh install. Removing `greatest` from the RPC or editing the migration's copy makes these tests fail
   - author deletion on top-level comments and nested replies; PI moderation; anonymous, inactive author/PI, nonmember and other-author denial; direct writes and physical deletion denied; full audit snapshots and unchanged descendants
@@ -633,7 +635,7 @@ Validation performed on **October 18, 2026** (V2, local only):
     - a failure injected after the full V2 install rolls everything back: V1 data identical by fingerprint, no archive, V1 RPCs and publication unchanged
     - the successful upgrade gives an archive identical to the backup; IDEA-001's Markdown, the profiles and the Auth users are unchanged; V1 functions and helpers are gone; the archive is unpublished and unreadable by members; existing members work on V2
     - a rerun is a no-op; archive removal requires confirmation and leaves profiles unchanged
-- **436 JavaScript syntax/DOM integration checks passed** using a simulated transport:
+- **445 JavaScript syntax/DOM integration checks passed** using a simulated transport:
   - notifications: the PI's and a researcher's views (new ideas for everyone, replies, results, joins, comments, deletions and removed comments; own actions excluded), unread count and label, pop-ups only for arrivals, marking read through the RPC, read state shared across devices, clicking a reply opening and highlighting it, a deleted idea opening its history, outside click and Escape closing the panel, a missing table degrading to a message, and nothing leaking across an account switch. Letting your own actions notify you makes these tests fail
   - avatars: four members get four distinct colours and `S`/`Ya`/`J`/`Yi` initials
   - descending default and Clear filters; ascending and descending order within each week; week and idea headers collapse and expand on click, stay that way after a Realtime refresh, and have three distinct header backgrounds
@@ -775,6 +777,24 @@ Data-preserving. `supabase/migrations/allow_member_update_result.sql` replaces o
 3. **Then deploy the frontend:** commit and `git push origin main`, wait for GitHub Pages, and hard-reload. Deploying the page first would show **Edit my result**, which the old function refuses with "Invalid status transition"; no data is at risk.
 4. **Verify live** with a disposable idea: submit Fail, use **Edit my result** to change it to Success, and confirm the badge and counts update in a second session without Refresh; History shows "changed their result from Fail to Success" with both states; the idea's creator gets a notification; another member sees no Edit control on your row.
 
+## 9F. Raise the idea description limit to 1 MiB — only after approval
+
+Data-preserving. `supabase/migrations/raise_description_limit.sql` replaces only the `ideas_description_check` constraint (100 KiB → 1 MiB of UTF-8 text), in one transaction. No row, function, trigger, RLS policy, grant or Realtime setting changes; every existing description already fits, and it is safe to rerun. Re-adding the constraint locks `public.ideas` for the moment it takes to check the existing rows; if the table is busy the migration stops after 5 seconds without changing anything, and can simply be rerun. It requires the V2 schema and works with or without sections 9–9E.
+
+1. **Review** the migration.
+2. **Migrate first.** In the SQL Editor, as `postgres`, run the whole migration file once. Check it with:
+
+   ```sql
+   select pg_get_constraintdef(oid) as rule from pg_constraint
+   where conrelid = 'public.ideas'::regclass and conname = 'ideas_description_check';
+   ```
+
+   The rule must read `CHECK ((octet_length(description) <= 1048576))`. The current page keeps working; it still refuses files above 100 KiB itself.
+3. **Then deploy the frontend:** commit and `git push origin main`, wait for GitHub Pages, and hard-reload. Deploying the page first would let members try a larger file, which the old constraint refuses with a message; the draft is kept and no data is at risk.
+4. **Verify live** by importing a disposable Markdown file between 100 KiB and 1 MiB: it publishes, renders, and opens for editing; then delete it.
+
+Large descriptions make the page heavier: every refresh downloads all ideas with their full text, and the preview and expanded card render the whole document (very math-heavy documents render more slowly). Notifications and Realtime are unaffected: Realtime events only trigger a refresh, and notifications read small fields only.
+
 ## Database API reference
 
 Every mutation is a PostgreSQL transaction through one of these RPCs. Every function uses an empty `search_path`, qualified objects, the authenticated caller (`auth.uid()`), and the administrator-managed profile. No RPC accepts a role, and only the PI-only `reopen_result` names another member. Audit triggers write full snapshots in the same transaction, so a rolled-back change creates no historical event.
@@ -795,15 +815,15 @@ Every mutation is a PostgreSQL transaction through one of these RPCs. Every func
 
 **Lock order is always parent before child.** Every participant or comment change first takes a `FOR KEY SHARE` lock on its idea, then locks only its own row. `delete_idea` takes `FOR UPDATE` on the idea, which conflicts with those locks: a deletion waits for in-flight changes and then snapshots them, and a change arriving during a deletion waits and then finds the idea gone. Idea edits take `FOR NO KEY UPDATE`, which does not conflict, so members, comments and edits never block each other. Week dates are stored as Monday `DATE`s; timestamps are `TIMESTAMPTZ` and displayed in the viewer's local timezone.
 
-Titles are limited to 200 characters; Markdown descriptions to 102,400 UTF-8 bytes; comments to 20,480 UTF-8 bytes; testing notes to 20,000 characters; URLs to 2,048 characters. The database validates HTTP(S) experiment URLs, and the frontend also parses each link before rendering it. Markdown passes through the parser and DOMPurify as a sanitized fragment; other user text uses `textContent`. No unsanitized user-provided HTML is inserted.
+Titles are limited to 200 characters; Markdown descriptions to 1,048,576 UTF-8 bytes (1 MiB); comments to 20,480 UTF-8 bytes; testing notes to 20,000 characters; URLs to 2,048 characters. The database validates HTTP(S) experiment URLs, and the frontend also parses each link before rendering it. Markdown passes through the parser and DOMPurify as a sanitized fragment; other user text uses `textContent`. No unsanitized user-provided HTML is inserted.
 
 ## Troubleshooting and maintenance
 
 | Symptom | What to check |
 | --- | --- |
 | Markdown library/preview unavailable | Check CDN access, pinned script versions/integrity, and browser console. Source falls back to safe text; never bypass sanitization |
-| Markdown exceeds database description limit | Descriptions are limited to 100 KiB and comments to 20 KiB of UTF-8 bytes, not characters; the draft is kept |
-| Import rejected | Check one `.md` file, UTF-8 encoding, accepted MIME type, no null characters, and at most 100 KiB; the previous draft is retained |
+| Markdown exceeds database description limit | Descriptions are limited to 1 MiB and comments to 20 KiB of UTF-8 bytes, not characters; the draft is kept. If a description between 100 KiB and 1 MiB is refused, run section 9F |
+| Import rejected | Check one `.md` file, UTF-8 encoding, accepted MIME type, no null characters, and at most 1 MiB; the previous draft is retained |
 | Sign-in library could not load | Internet/CDN access, the pinned SDK URL and matching integrity hash, browser console, stale cached HTML |
 | Invalid credentials / unconfirmed email | Correct Auth project, exact member email/password, account confirmation; never use the database password |
 | Access has not been granted | Auth UUID matches the administrator-created profile; `active = true`; no reliance on editable name/email metadata |

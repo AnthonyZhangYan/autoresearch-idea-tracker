@@ -32,13 +32,14 @@ try {
   await db.initialise(); await db.start();
   const admin = db.getPgClient(); await admin.connect(); clients.push(admin);
   await admin.query(`create role anon nologin; create role authenticated nologin; ${authStub}`);
-  const [schema, exportSQL, dropArchiveSQL, v1Schema, repliesMigration, v20Schema, creatorDeleteMigration, notifyMigration, authorDeleteMigration, resultEditMigration] = await Promise.all([read('../supabase/schema.sql'),read('../supabase/export_v1_backup.sql'),
-    read('../supabase/drop_v1_archive.sql'),read('./fixtures/schema_v1.sql'),read('../supabase/migrations/add_comment_replies.sql'),read('./fixtures/schema_v2_0.sql'),read('../supabase/migrations/allow_creator_delete_untouched_idea.sql'),read('../supabase/migrations/add_notification_reads.sql'),read('../supabase/migrations/allow_comment_author_delete.sql'),read('../supabase/migrations/allow_member_update_result.sql')]);
-  for (const [name,sql] of [['schema.sql',schema],['export',exportSQL],['archive cleanup',dropArchiveSQL],['replies migration',repliesMigration],['author deletion migration',authorDeleteMigration],['creator deletion migration',creatorDeleteMigration],['notification migration',notifyMigration],['result edit migration',resultEditMigration]]) {
+  const [schema, exportSQL, dropArchiveSQL, v1Schema, repliesMigration, v20Schema, creatorDeleteMigration, notifyMigration, authorDeleteMigration, resultEditMigration, limitMigration] = await Promise.all([read('../supabase/schema.sql'),read('../supabase/export_v1_backup.sql'),
+    read('../supabase/drop_v1_archive.sql'),read('./fixtures/schema_v1.sql'),read('../supabase/migrations/add_comment_replies.sql'),read('./fixtures/schema_v2_0.sql'),read('../supabase/migrations/allow_creator_delete_untouched_idea.sql'),read('../supabase/migrations/add_notification_reads.sql'),read('../supabase/migrations/allow_comment_author_delete.sql'),read('../supabase/migrations/allow_member_update_result.sql'),read('../supabase/migrations/raise_description_limit.sql')]);
+  for (const [name,sql] of [['schema.sql',schema],['export',exportSQL],['archive cleanup',dropArchiveSQL],['replies migration',repliesMigration],['author deletion migration',authorDeleteMigration],['creator deletion migration',creatorDeleteMigration],['notification migration',notifyMigration],['result edit migration',resultEditMigration],['description limit migration',limitMigration]]) {
     check(/```|\\[_*<>]|&(?:lt|gt);/.test(sql),false,`${name} is plain SQL, not escaped Markdown`);
     check(/\bcascade\b/i.test(sql.replace(/--.*$/gm,'')),false,`${name} uses no CASCADE`);
   }
   await admin.query(schema); await admin.query(schema); checks++; // fresh install, then repeatable rerun
+  const descriptionLimit = async client => (await client.query("select pg_get_constraintdef(oid) d from pg_constraint where conrelid='public.ideas'::regclass and conname='ideas_description_check'")).rows.map(r => r.d);
 
   // ---- Catalog: publication, RLS, grants, no cascading foreign keys, no V1 objects.
   const publicationFlags = async (client = admin) => (await client.query(`select pubinsert, pubupdate, pubdelete, pubtruncate
@@ -747,6 +748,28 @@ try {
   const liveSuccess = await rpc(liveJunqi,'submit_result',[resultIdea.id,liveFail.revision,'success','Deployed fail',null]);
   check([liveSuccess.status,liveSuccess.result,liveSuccess.notes],['completed','success','Deployed fail'],'migrated RPC: member changes a pre-existing result');
   await rejects(() => rpc(liveYan,'submit_result',[resultIdea.id,liveSuccess.revision,'fail',null,null]),/Participation not found/,'migrated RPC: no one else can change it');
+  // ---- Description-limit migration (100 KiB -> 1 MiB) on the deployed schema + every earlier migration.
+  const limitIdea = await create(liveShibo,'Live idea before the limit change');
+  const overOld = 'é'.repeat(51201); // 102,402 bytes: just over the deployed 100 KiB limit
+  await rejects(() => rpc(liveYan,'create_idea',['Too large for the deployed limit',overOld,'2026-10-12','low']),/ideas_description_check/,'deployed schema: 100 KiB limit in force');
+  const beforeLimitMigration = await dataSnapshot(), oldLimit = await descriptionLimit(live);
+  await rejects(() => live.query(limitMigration.replace(/commit;\s*$/i,()=>"do $$ begin raise exception 'Injected migration failure'; end; $$; commit;")),/Injected migration failure/,'description-limit migration is transactional');
+  await live.query('rollback');
+  check([await descriptionLimit(live),await dataSnapshot()],[oldLimit,beforeLimitMigration],'failed description-limit migration keeps the old limit and all data');
+  await live.query(limitMigration);
+  check(await dataSnapshot(),beforeLimitMigration,'description-limit migration preserves every row, result, comment and event');
+  check(await policySnapshot(),beforePolicies,'RLS policies unchanged by the description-limit migration');
+  await live.query(limitMigration);
+  check(await dataSnapshot(),beforeLimitMigration,'repeating the description-limit migration preserves all data');
+  check([await descriptionLimit(live),(await descriptionLimit(live))[0].includes('1048576')],[await descriptionLimit(admin),true],'migrated and freshly installed description limits are identical (1 MiB)');
+  const atLimit = 'é'.repeat(524287) + 'xx'; // exactly 1,048,576 UTF-8 bytes
+  const bigIdea = await rpc(liveYan,'create_idea',['Large Markdown idea',atLimit,'2026-10-12','low']);
+  check((await live.query('select octet_length(description) n, description = $2 same from public.ideas where id=$1',[bigIdea.id,atLimit])).rows[0],{n:1048576,same:true},'migrated: exactly 1 MiB stored verbatim');
+  await rejects(() => rpc(liveYan,'create_idea',['One byte too large',atLimit + 'x','2026-10-12','low']),/ideas_description_check/,'migrated: 1 MiB + 1 byte rejected');
+  const grown = await rpc(liveShibo,'update_idea',[limitIdea.id,limitIdea.revision,limitIdea.title,overOld,'2026-10-12','high']);
+  check(Number(grown.revision),Number(limitIdea.revision) + 1,'migrated: an existing idea can grow beyond 100 KiB');
+  check((await live.query("select new_state->>'description' = $2 same from public.idea_events where idea_id=$1 and event_type='edited' order by id desc limit 1",[limitIdea.id,overOld])).rows[0].same,true,'history keeps the full larger description');
+  await rejects(() => rpc(liveShibo,'update_idea',[limitIdea.id,grown.revision,limitIdea.title,atLimit + 'x','2026-10-12','high']),/ideas_description_check/,'migrated: edits above 1 MiB rejected');
   const afterAuthorDeletes = await dataSnapshot();
   await live.query(authorDeleteMigration);
   check(await dataSnapshot(),afterAuthorDeletes,'rerun preserves removals and history');
@@ -816,8 +839,10 @@ try {
   await notV2.query('rollback');
   await rejects(() => notV2.query(resultEditMigration),/requires the V2 schema/,'result-edit migration refuses a missing V2 schema');
   await notV2.query('rollback');
+  await rejects(() => notV2.query(limitMigration),/requires the V2 schema/,'description-limit migration refuses a missing V2 schema');
+  await notV2.query('rollback');
 
-  console.log(`PASS: ${checks} PostgreSQL checks, including notification read state and its migration, creator/PI idea deletion rules and their migration, threaded replies and their additive migration, concurrent participation, parallel independent results, comment idempotency, publication WAL filtering, parent-before-child deletion races, and the backup-verified single-transaction V1 upgrade. Hosted Supabase was not used.`);
+  console.log(`PASS: ${checks} PostgreSQL checks, including the 1 MiB description limit and its migration, notification read state and its migration, creator/PI idea deletion rules and their migration, threaded replies and their additive migration, concurrent participation, parallel independent results, comment idempotency, publication WAL filtering, parent-before-child deletion races, and the backup-verified single-transaction V1 upgrade. Hosted Supabase was not used.`);
 } finally {
   await Promise.allSettled(clients.map(client => client.end()));
   await db.stop(); await rm(directory,{recursive:true,force:true});

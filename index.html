@@ -89,7 +89,7 @@
 // Public frontend configuration only. Authorization lives in PostgreSQL.
 const SUPABASE_URL = 'https://kgfybebpxpdkiouofyow.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_yqKiI7EJhNyA7KbB-b0cKQ_Ix03Vz62';
-const MAX_MARKDOWN_BYTES = 102400; // Must match ideas_description_check in schema.sql.
+const MAX_MARKDOWN_BYTES = 1048576; // Must match ideas_description_check in schema.sql.
 const utf8Bytes = text => new TextEncoder().encode(text).byteLength;
 const MIN_PASSWORD_LENGTH = 8; // Keep at or above the Supabase Auth minimum password length.
 const MAX_PASSWORD_BYTES = 72; // Supabase Auth rejects longer passwords.
@@ -270,7 +270,7 @@ function renderMarkdown(container, source) {
   try {
     const parser = getMarkdownParser();
     if (!parser) throw new Error('Markdown libraries unavailable. Showing the original text. Reload to restore the formatted preview.');
-    if (utf8Bytes(source) > MAX_MARKDOWN_BYTES) throw new Error('Preview paused: Markdown exceeds 100 KiB. Shorten the draft before publishing; no text has been removed.');
+    if (utf8Bytes(source) > MAX_MARKDOWN_BYTES) throw new Error('Preview paused: Markdown exceeds 1 MiB. Shorten the draft before publishing; no text has been removed.');
     // The only HTML parsing path is DOMPurify's sanitized fragment. Raw HTML in
     // Markdown is disabled; the final pass also sanitizes generated KaTeX markup.
     const fragment = window.DOMPurify.sanitize(parser.render(source.replace(/^\uFEFF/,'')), {
@@ -307,7 +307,7 @@ async function readMarkdownFile(file) {
   if (!['','text/markdown','text/x-markdown','text/plain','application/octet-stream'].includes(mime)) {
     throw new Error('This file type is not supported. Save the document as a UTF-8 .md text file.');
   }
-  if (file.size > MAX_MARKDOWN_BYTES) throw new Error('This file exceeds 100 KiB. Shorten it before importing. Your existing draft has not changed.');
+  if (file.size > MAX_MARKDOWN_BYTES) throw new Error('This file exceeds 1 MiB. Shorten it before importing. Your existing draft has not changed.');
   const bytes = await new Promise((resolve,reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
@@ -319,7 +319,7 @@ async function readMarkdownFile(file) {
   try { source = new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes); }
   catch { throw new Error('The file is not valid UTF-8. Save it as UTF-8 Markdown and try again.'); }
   if (source.includes('\0')) throw new Error('This file contains a null character and cannot be stored as PostgreSQL text.');
-  if (utf8Bytes(source) > MAX_MARKDOWN_BYTES) throw new Error('Markdown must be at most 100 KiB of UTF-8 text.');
+  if (utf8Bytes(source) > MAX_MARKDOWN_BYTES) throw new Error('Markdown must be at most 1 MiB of UTF-8 text.');
   return {source,...suggestedMarkdownTitle(source,file.name)};
 }
 function experimentLink(value) {
@@ -339,7 +339,7 @@ function showNotification(message, error = false) {
 }
 function friendlyError(error) {
   const message = error?.message || '';
-  if (message.includes('ideas_description_check')) return 'The Markdown exceeds the database description limit. Use at most 100 KiB of UTF-8 text. If it is within that limit, ask the administrator to apply the updated schema.sql; the old limit was 20,000 characters. Your draft has been kept.';
+  if (message.includes('ideas_description_check')) return 'The Markdown exceeds the database description limit. Use at most 1 MiB of UTF-8 text. If it is within that limit, ask the administrator to run supabase/migrations/raise_description_limit.sql; the old limit was 100 KiB. Your draft has been kept.';
   if (message.includes('Already participating')) return 'You are already participating in this idea. The latest state has been requested.';
   if (message.includes('Participation changed')) return 'Your participation changed while you were working. Close this dialog, review the latest state, and try again.';
   if (message.includes('Result unchanged')) return 'Nothing changed. Choose a different result or edit the notes or link.';
@@ -1295,7 +1295,7 @@ function openIdeaDialog(idea = null) {
   const form = node('form','markdown-editor');
   const title = formField('Title','text',idea?.title,{required:true,maxLength:200});
   const description = formField('Description (Markdown)','textarea',idea?.description,
-    {hint:'Headings, lists, tables, code, links, $inline math$ and $$display math$$. Maximum 100 KiB of UTF-8 text.'});
+    {hint:'Headings, lists, tables, code, links, $inline math$ and $$display math$$. Maximum 1 MiB of UTF-8 text.'});
   // Native textareas normalize CRLF on assignment. Keep the exact original
   // string until an actual input event, including BOM, whitespace and line ends.
   let markdownSource = idea?.description || '', importing = false, previewTimer;
@@ -1310,13 +1310,13 @@ function openIdeaDialog(idea = null) {
     if (!form.isConnected) return;
     const bytes = utf8Bytes(markdownSource);
     size.textContent = `${bytes.toLocaleString()} / ${MAX_MARKDOWN_BYTES.toLocaleString()} UTF-8 bytes`;
-    description.input.setCustomValidity(bytes > MAX_MARKDOWN_BYTES ? 'Markdown exceeds 100 KiB. Shorten the draft; no text has been removed.' :
+    description.input.setCustomValidity(bytes > MAX_MARKDOWN_BYTES ? 'Markdown exceeds 1 MiB. Shorten the draft; no text has been removed.' :
       markdownSource.includes('\0') ? 'Remove null characters before publishing.' : '');
     renderMarkdown(preview,markdownSource);
   };
   description.input.addEventListener('input',() => {
     markdownSource = description.input.value;
-    clearTimeout(previewTimer); previewTimer = setTimeout(updatePreview,180);
+    clearTimeout(previewTimer); previewTimer = setTimeout(updatePreview,markdownSource.length > 100000 ? 600 : 180);
   });
   const week = formField('Week starting','date',idea?.week_start || currentMonday(),{required:true,hint:'Choose a Monday.'});
   const priority = formField('Priority','select',idea?.priority || 'medium',{choices:[['low','Low'],['medium','Medium'],['high','High']]});
@@ -1498,7 +1498,7 @@ async function loadHistory(reset) {
 // so read/unread is shared by every device. New ideas notify everyone; other
 // events notify the people they concern, never the person who acted.
 const NOTIFICATION_WINDOW = 200, NOTIFICATION_LIST = 50;
-// Small JSON fields only: full snapshots can hold 100 KiB of Markdown each.
+// Small JSON fields only: full snapshots can hold 1 MiB of Markdown each.
 const NOTIFICATION_COLUMNS = ['id','idea_id','idea_number','actor_id','member_id','event_type','created_at',
   'title:new_state->>title','old_title:previous_state->>title','new_creator:new_state->>created_by','old_creator:previous_state->>created_by',
   'comment_id:new_state->>id','parent_id:new_state->>parent_comment_id','comment_author:previous_state->>author_id',

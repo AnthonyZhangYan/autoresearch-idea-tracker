@@ -148,7 +148,7 @@ create table if not exists public.ideas (
   id uuid primary key default gen_random_uuid(),
   idea_number bigint generated always as identity unique,
   title text not null check (length(btrim(title)) between 1 and 200),
-  description text not null default '' check (octet_length(description) <= 102400),
+  description text not null default '' check (octet_length(description) <= 1048576),
   week_start date not null check (extract(isodow from week_start) = 1),
   priority text not null default 'medium' check (priority in ('low', 'medium', 'high')),
   created_by uuid not null references public.profiles(id) on delete restrict,
@@ -747,6 +747,13 @@ grant execute on function public.mark_notifications_read(bigint) to authenticate
 insert into public.notification_reads(member_id, last_read_event_id)
 select p.id, (select coalesce(max(e.id), 0) from public.idea_events e) from public.profiles p
 on conflict (member_id) do nothing;
+
+-- >>> shared: description limit (identical in supabase/schema.sql)
+-- Descriptions hold whole Markdown documents: at most 1 MiB of UTF-8 text.
+alter table public.ideas drop constraint if exists ideas_description_check;
+alter table public.ideas add constraint ideas_description_check
+  check (octet_length(description) <= 1048576);
+-- <<< shared
 
 -- Supabase Postgres Changes does not apply row-level RLS to DELETE events.
 -- Publish only INSERT/UPDATE. Every participant, comment and deletion change
