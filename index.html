@@ -878,12 +878,18 @@ function renderIdeas() {
   visible.forEach(idea => { if (!groups.has(idea.week_start)) groups.set(idea.week_start,[]); groups.get(idea.week_start).push(idea); });
   for (const [week,ideas] of groups) {
     const details = node('details','week'); details.open = state.weekOpen.get(week) ?? true;
-    details.addEventListener('toggle',() => { if (details.isConnected) state.weekOpen.set(week,details.open); });
+    // Collapsing a week also collapses its ideas, so reopening it shows a tidy list.
+    const collapseIdeas = () => ideas.forEach(idea => state.ideaOpen.set(idea.id,false));
+    details.addEventListener('toggle',() => {
+      if (!details.isConnected) return;
+      state.weekOpen.set(week,details.open);
+      if (!details.open) { collapseIdeas(); details.querySelectorAll('.idea[open]').forEach(card => { card.open = false; }); }
+    });
     const summary = node('summary'); summary.dataset.focusKey = `week-${week}`;
     // Record the new state on the click itself (Enter/Space also click): the
     // toggle event comes later, and a Realtime refresh in between would
     // otherwise rebuild the week with its old state.
-    summary.addEventListener('click',() => state.weekOpen.set(week,!details.open));
+    summary.addEventListener('click',() => { state.weekOpen.set(week,!details.open); if (details.open) collapseIdeas(); });
     const title = node('span','week-title'); title.append(node('span','chevron','▾'),node('span','week-name',`Week of ${dateText(week)}`));
     summary.append(title,node('span','week-meta',`${ideas.length} ${ideas.length === 1 ? 'idea' : 'ideas'} · ${ideas.filter(i => ideaSummary(i).results).length} with results`));
     const list = node('div','week-ideas'); ideas.forEach(idea => list.append(renderIdeaCard(idea)));

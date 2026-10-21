@@ -652,6 +652,21 @@ try {
   await app.loadIdeas();
   check([card('IDEA-1000').open,style(ideaHead('IDEA-1000')).backgroundColor],[false,collapsedIdea],'collapsing restores the lighter header');
   check(style(ideaHead('IDEA-1000')).backgroundColor!==style(weekHead()).backgroundColor,true,'idea header stays distinct from the week header');
+  // Collapsing a week collapses the ideas inside it; other weeks are untouched.
+  const weekOfIdea=card('IDEA-1000').closest('.week'),otherWeek=[...d.querySelectorAll('.week')].find(wk=>wk!==weekOfIdea),otherIdea=otherWeek?.querySelector('.idea');
+  if (otherIdea) { otherIdea.querySelector(':scope > summary').click(); await wait(()=>otherIdea.open); }
+  ideaHead('IDEA-1000').click();await wait(()=>card('IDEA-1000').open);
+  const innerIds=[...weekOfIdea.querySelectorAll('.idea')].map(c=>c.dataset.ideaId);
+  check(innerIds.length>1 && [...weekOfIdea.querySelectorAll('.idea[open]')].length>=1,true,'an idea is expanded inside the week');
+  const innerKey=weekOfIdea.querySelector(':scope > summary').dataset.focusKey.replace('week-','');
+  weekOfIdea.querySelector(':scope > summary').click();
+  await wait(()=>app.state.weekOpen.get(innerKey)===false);
+  check(innerIds.map(id=>app.state.ideaOpen.get(id)??false),innerIds.map(()=>false),'collapsing a week collapses every idea inside it');
+  await app.loadIdeas();
+  const reopenedWeek=card('IDEA-1000').closest('.week');reopenedWeek.querySelector(':scope > summary').click();
+  await wait(()=>app.state.weekOpen.get(innerKey)===true);
+  check([...reopenedWeek.querySelectorAll('.idea[open]')].length,0,'reopening the week shows its ideas collapsed, even after a refresh');
+  if (otherIdea) check(card(otherIdea.querySelector('.idea-number').textContent).open,true,'ideas in other weeks stay expanded');
   ideaHead('IDEA-10000').click();await wait(()=>card('IDEA-10000').open);
   await snapshot('headers.html');
 
