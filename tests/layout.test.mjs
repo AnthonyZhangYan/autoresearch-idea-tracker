@@ -194,18 +194,22 @@ readingMeasure.textContent = `window.fitInlineMath = ${w.__app.fitInlineMath.toS
     window.fitInlineMath();
     const root = document.documentElement, reader = document.getElementById('reader'), list = document.getElementById('ideas');
     const card = document.querySelector('.idea[open]'), box = reader.getBoundingClientRect(), side = list.getBoundingClientRect(), style = getComputedStyle(reader);
-    const clipped = [];
-    for (const el of reader.querySelectorAll('p,li,h1,h2,h3,blockquote,.katex,.katex-display,pre,table')) {
+    const pane = document.getElementById('reader-body'), paneBox = pane.getBoundingClientRect(), clipped = [];
+    for (const el of pane.querySelectorAll('p,li,h1,h2,h3,blockquote,.katex,.katex-display,pre,table')) {
       const r = el.getBoundingClientRect();
       let scrolls = false;
-      for (let node = el.parentElement; node && node !== reader; node = node.parentElement) if (['auto','scroll'].includes(getComputedStyle(node).overflowX)) scrolls = true;
-      if (r.width && !scrolls && (r.right > box.right + 1 || r.left < box.left - 1)) clipped.push(el.tagName.toLowerCase() + ' "' + el.textContent.trim().slice(0,30) + '"');
+      for (let node = el.parentElement; node && node !== pane; node = node.parentElement) if (['auto','scroll'].includes(getComputedStyle(node).overflowX)) scrolls = true;
+      if (r.width && !scrolls && (r.right > paneBox.right + 1 || r.left < paneBox.left - 1)) clipped.push(el.tagName.toLowerCase() + ' "' + el.textContent.trim().slice(0,30) + '"');
     }
+    // Only the text scrolls: the title and close button stay put at the top of the pane.
+    const close = () => document.getElementById('reader-close').getBoundingClientRect().top, closeTop = close();
+    pane.scrollTop = 400;
+    const bodyScrolls = pane.scrollTop > 0 && reader.scrollTop === 0 && close() === closeTop && closeTop >= box.top;
     const out = document.createElement('pre'); out.id = 'layout-result';
     out.textContent = JSON.stringify({viewport:root.clientWidth,pageOverflow:root.scrollWidth - root.clientWidth,
       readerShown:style.display !== 'none',cardTextHidden:getComputedStyle(card.querySelector('.description')).display === 'none',
       sideBySide:side.right <= box.left && box.right <= root.clientWidth,listWidth:Math.round(side.width),
-      sticky:style.position === 'sticky' && box.height <= innerHeight - 31,clipped,displayCount:reader.querySelectorAll('.katex-display').length,
+      sticky:style.position === 'sticky' && box.height <= innerHeight - 31,bodyScrolls,clipped,displayCount:reader.querySelectorAll('.katex-display').length,
       wideScroll:[...reader.querySelectorAll('.katex-display,pre,table')].filter(el => el.scrollWidth > el.clientWidth + 1).every(el => ['auto','scroll'].includes(getComputedStyle(el).overflowX))});
     document.body.append(out);
   });
@@ -235,7 +239,7 @@ try {
     check(result.cards.length,1,`${label}: the expanded idea was measured`);
   }
   const reading = await runChrome('reading.html',1280,800);
-  check([reading.pageOverflow,reading.readerShown,reading.cardTextHidden,reading.sideBySide,reading.listWidth >= 420,reading.sticky],[0,true,true,true,true,true],
+  check([reading.pageOverflow,reading.readerShown,reading.cardTextHidden,reading.sideBySide,reading.listWidth >= 420,reading.sticky,reading.bodyScrolls],[0,true,true,true,true,true,true],
     `wide reading mode: list on the left, text in a sticky pane on the right, no page overflow (${JSON.stringify(reading)})`);
   check([reading.clipped,reading.displayCount,reading.wideScroll],[[],2,true],'wide reading mode: Markdown and math fit the pane; wide blocks scroll');
   const narrowReading = await runChrome('reading.html',1000,800);

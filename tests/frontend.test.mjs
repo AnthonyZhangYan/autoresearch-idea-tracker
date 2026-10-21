@@ -1073,7 +1073,7 @@ try {
   }
   // ---- Wide screens: one idea's Markdown in the reading pane; the rest stays in the list.
   {
-    const savedMatch=w.matchMedia;let wide=true;
+    const savedMatch=w.matchMedia,savedScroll=w.scrollTo,scrolls=[];let wide=true;w.scrollTo=options=>scrolls.push(options);
     w.matchMedia=query=>({matches:wide && query==='(min-width: 1100px)',addEventListener(){}});
     click('collapse-all');for (const week of d.querySelectorAll('.week')) { week.open=true; week.dispatchEvent(new w.Event('toggle')); }
     const reader=d.getElementById('reader'), dash=d.getElementById('dashboard'), head=number=>card(number).querySelector(':scope > summary');
@@ -1082,8 +1082,10 @@ try {
     head(first).click();await settled();
     check([reader.hidden,dash.classList.contains('reading'),card(first).open,card(first).classList.contains('selected'),text('reader-number')],[false,true,true,true,first],'wide screen: clicking an idea opens its text in the reading pane');
     check([d.querySelector('#reader-title .idea-title').textContent,!!card(first).querySelector('.discussion'),!!card(first).querySelector('[data-slot="participants"]')],[firstIdea.title,true,true],'title in the pane; participants and discussion stay in the list');
+    card(second).getBoundingClientRect=()=>({top:500,bottom:560,left:0,right:0,width:0,height:60});
     head(second).click();await settled();
     check([card(first).open,card(second).open,text('reader-number'),d.querySelectorAll('.idea.selected').length],[false,true,second,1],'selecting another idea closes the previous one and shows the new text');
+    check({...scrolls.at(-1)},{top:484,behavior:'smooth'},'the selected idea scrolls to the top, level with the pane');
     head(second).click();await settled();
     check([reader.hidden,dash.classList.contains('reading'),card(second).open],[true,false,false],'clicking the selected idea again closes the pane');
     head(first).click();d.getElementById('reader-close').click();
@@ -1100,7 +1102,7 @@ try {
     check([reader.hidden,card(first).classList.contains('selected')],[false,true],'a live edit refreshes the open text and keeps the selection');
     wide=false;await app.loadIdeas();
     check([reader.hidden,dash.classList.contains('reading'),card(first).open],[true,false,true],'narrow screens keep the inline card');
-    Object.assign(row,saved);w.matchMedia=savedMatch;click('collapse-all');await app.loadIdeas();
+    Object.assign(row,saved);w.matchMedia=savedMatch;w.scrollTo=savedScroll;click('collapse-all');await app.loadIdeas();
   }
   app.openIdeaDialog(app.state.ideas.at(-1));
   const editor=d.querySelector('#modal-body textarea');editor.value='# Revised Markdown\n\n$x^2$';editor.dispatchEvent(new w.Event('input'));
