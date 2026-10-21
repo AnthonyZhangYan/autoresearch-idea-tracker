@@ -152,8 +152,35 @@ await cp(join(katexDir,'katex.min.css'),join(dir,'katex.min.css'));
 await cp(join(katexDir,'fonts'),join(dir,'fonts'),{recursive:true});
 await writeFile(join(dir,'phone.html'),`<!doctype html><html><body style="margin:0"><iframe src="page.html" style="width:390px;height:3000px;border:0"></iframe>
 <pre id="layout-result"></pre><script>addEventListener('message',e=>{document.getElementById('layout-result').textContent=e.data;});</script></body></html>`);
-const runChrome = (page,width) => new Promise((done,fail) => execFile(chrome,['--headless=new','--disable-gpu','--no-first-run','--hide-scrollbars','--allow-file-access-from-files',
-  `--window-size=${width},3000`,'--virtual-time-budget=8000','--dump-dom',pathToFileURL(join(dir,page)).href],{maxBuffer:64 * 1024 * 1024},(error,stdout) => {
+// A long dialog (like Lab activity history) scrolled to the bottom: the title
+// and close button must stay in view, and only the dialog body scrolls.
+const dialogCopy = d.documentElement.cloneNode(true);
+dialogCopy.querySelectorAll('script,meta[http-equiv]').forEach(el => el.remove());
+dialogCopy.querySelectorAll('link[rel=stylesheet]').forEach(el => el.setAttribute('href','katex.min.css'));
+const dialogMeasure = d.createElement('script');
+dialogMeasure.textContent = `(${function measureDialog() {
+  const modal = document.getElementById('modal'), body = document.getElementById('modal-body');
+  document.getElementById('modal-title').textContent = 'Lab activity history';
+  for (let n = 0; n < 120; n++) {
+    const item = document.createElement('article'); item.className = 'history-item';
+    item.innerHTML = '<strong>IDEA-' + n + ' · Synthetic member created the idea.</strong><p>Synthetic history entry used for the dialog layout test.</p>';
+    body.append(item);
+  }
+  modal.showModal();
+  setTimeout(() => {
+    body.scrollTop = body.scrollHeight;
+    const close = document.getElementById('modal-close').getBoundingClientRect(), box = modal.getBoundingClientRect();
+    const out = document.createElement('pre'); out.id = 'layout-result';
+    out.textContent = JSON.stringify({bodyScrolled:body.scrollTop > 0,dialogScroll:modal.scrollTop,
+      closeVisible:close.top >= box.top && close.bottom <= Math.min(box.bottom,innerHeight) && close.top >= 0,
+      fitsViewport:box.bottom <= innerHeight + 1});
+    document.body.append(out);
+  },100);
+}})();`;
+dialogCopy.querySelector('body').append(dialogMeasure);
+await writeFile(join(dir,'dialog.html'),'<!doctype html>\n' + dialogCopy.outerHTML);
+const runChrome = (page,width,height = 3000) => new Promise((done,fail) => execFile(chrome,['--headless=new','--disable-gpu','--no-first-run','--hide-scrollbars','--allow-file-access-from-files',
+  `--window-size=${width},${height}`,'--virtual-time-budget=8000','--dump-dom',pathToFileURL(join(dir,page)).href],{maxBuffer:64 * 1024 * 1024},(error,stdout) => {
   if (error) return fail(error);
   const match = stdout.match(/<pre id="layout-result">([^<]*)<\/pre>/);
   if (!match || !match[1]) return fail(new Error(`no layout result from ${page}`));
@@ -173,6 +200,10 @@ try {
       check([card.displayCount,card.rawDelimiters],[2,false],`${label}: \[ \] and $$ display math render; no raw delimiters left`);
     }
     check(result.cards.length,1,`${label}: the expanded idea was measured`);
+  }
+  for (const [label,width,height] of [['desktop',1280,800],['phone',390,700]]) {
+    const dialog = await runChrome('dialog.html',width,height);
+    check(dialog,{bodyScrolled:true,dialogScroll:0,closeVisible:true,fitsViewport:true},`${label}: a long dialog scrolls its body while the title and close button stay visible`);
   }
   console.log(`PASS: ${checks} real-browser layout checks (desktop 1280px, phone 390px) with synthetic Chinese/LaTeX Markdown, using ${chrome}.`);
 } finally { w.close(); await rm(dir,{recursive:true,force:true}); }
