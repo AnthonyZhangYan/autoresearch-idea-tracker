@@ -203,6 +203,7 @@ const submit = () => d.querySelector('#modal-body form').dispatchEvent(new w.Eve
 const text = id => d.getElementById(id).textContent;
 const card = number => [...d.querySelectorAll('.idea')].find(el=>el.querySelector('.idea-number').textContent===number);
 const labels = element => [...element.querySelectorAll('button')].map(b=>b.textContent);
+const openAll = () => { for (const el of d.querySelectorAll('.week,.idea')) if (!el.open) { el.open=true; el.dispatchEvent(new w.Event('toggle')); } };
 const press = (element,label) => [...element.querySelectorAll('button')].find(b=>b.textContent===label).click();
 const settled = () => wait(()=>!app.state.pending && !app.state.refreshTask);
 const ideaById = id => app.state.ideas.find(i=>i.id===id);
@@ -242,8 +243,8 @@ try {
   check(channel.handlers.map(h=>h.filter.table),['ideas','idea_events','profiles'],'subscribed tables');
   check(channel.handlers.every(h=>h.filter.event==='*'),true,'all change types');
   check(d.getElementById('create-button').hidden,false,'PI can publish');
-  click('expand-all');
-  check([...d.querySelectorAll('.idea,.week')].every(el=>el.open),true,'expand all');
+  check(d.getElementById('expand-all'),null,'no Expand all: one idea is read at a time');
+  openAll();check([...d.querySelectorAll('.idea,.week')].every(el=>el.open),true,'all cards open');
   await snapshot('dashboard.html');
   click('collapse-all');check([...d.querySelectorAll('.idea,.week')].every(el=>!el.open),true,'collapse all');
   const setFilter=(id,value)=>{d.getElementById(id).value=value;d.getElementById(id).dispatchEvent(new w.Event(id==='search'?'input':'change'));};
@@ -453,7 +454,7 @@ try {
   check(thread('IDEA-003').querySelector('.comment.removed').textContent.includes('Comment removed by Shibo'),true,'removed comment placeholder');
   check(thread('IDEA-003').querySelector('.comment.removed .markdown-body'),null,'removed body hidden in UI');
   check(card('IDEA-003').querySelector('.discussion-head h3').textContent,'Discussion (2)','count excludes removed comment');
-  click('expand-all');
+  openAll();
   await snapshot('discussion.html');
   click('collapse-all');
   currentId='member-1';await app.loadCurrentUser(session());await settled();
@@ -616,7 +617,7 @@ try {
   await snapshot('numbers.html');
 
   // ---- Two collapsible levels: slate week headers, neutral idea headers.
-  click('collapse-all');click('expand-all');click('collapse-all');
+  click('collapse-all');
   for (const week of d.querySelectorAll('.week')) { week.open=true; week.dispatchEvent(new w.Event('toggle')); }
   const firstWeek=()=>d.querySelector('.week'), weekHead=()=>firstWeek().querySelector(':scope > summary');
   const ideaHead=number=>card(number).querySelector(':scope > summary');
@@ -1069,6 +1070,37 @@ try {
     check(app.markdownFileName({idea_number:12345,title:'超长标题'.repeat(40)}),'IDEA-12345 '+'超长标题'.repeat(20)+'.md','long titles shortened by character');
     check(app.markdownFileName({idea_number:3,title:'...'}),'IDEA-003.md','title without usable characters falls back to the number');
     d.removeEventListener('click',catchDownload,true);w.URL.createObjectURL=savedCreate;w.URL.revokeObjectURL=savedRevoke;
+  }
+  // ---- Wide screens: one idea's Markdown in the reading pane; the rest stays in the list.
+  {
+    const savedMatch=w.matchMedia;let wide=true;
+    w.matchMedia=query=>({matches:wide && query==='(min-width: 1100px)',addEventListener(){}});
+    click('collapse-all');for (const week of d.querySelectorAll('.week')) { week.open=true; week.dispatchEvent(new w.Event('toggle')); }
+    const reader=d.getElementById('reader'), dash=d.getElementById('dashboard'), head=number=>card(number).querySelector(':scope > summary');
+    const [first,second]=[...d.querySelectorAll('.idea')].map(c=>c.querySelector('.idea-number').textContent);
+    const firstIdea=app.state.ideas.find(i=>i.id===card(first).dataset.ideaId);
+    head(first).click();await settled();
+    check([reader.hidden,dash.classList.contains('reading'),card(first).open,card(first).classList.contains('selected'),text('reader-number')],[false,true,true,true,first],'wide screen: clicking an idea opens its text in the reading pane');
+    check([d.querySelector('#reader-title .idea-title').textContent,!!card(first).querySelector('.discussion'),!!card(first).querySelector('[data-slot="participants"]')],[firstIdea.title,true,true],'title in the pane; participants and discussion stay in the list');
+    head(second).click();await settled();
+    check([card(first).open,card(second).open,text('reader-number'),d.querySelectorAll('.idea.selected').length],[false,true,second,1],'selecting another idea closes the previous one and shows the new text');
+    head(second).click();await settled();
+    check([reader.hidden,dash.classList.contains('reading'),card(second).open],[true,false,false],'clicking the selected idea again closes the pane');
+    head(first).click();d.getElementById('reader-close').click();
+    check([reader.hidden,card(first).open,d.activeElement===head(first)],[true,false,true],'close button returns to the centered list and focuses the idea');
+    head(first).click();d.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape'}));
+    check([reader.hidden,card(first).open],[true,false],'Escape closes the pane');
+    head(first).click();click('collapse-all');
+    check([reader.hidden,d.querySelectorAll('.idea[open]').length,app.state.readingId],[true,0,null],'Collapse all closes the pane');
+    for (const week of d.querySelectorAll('.week')) { week.open=true; week.dispatchEvent(new w.Event('toggle')); }
+    head(first).click();
+    const row=ideas.find(i=>i.id===firstIdea.id), saved={description:row.description,revision:row.revision};
+    Object.assign(row,{description:'# Updated live\n\nNew text',revision:row.revision+1});
+    await app.loadIdeas();await wait(()=>d.querySelector('#reader-body h1')?.textContent==='Updated live');
+    check([reader.hidden,card(first).classList.contains('selected')],[false,true],'a live edit refreshes the open text and keeps the selection');
+    wide=false;await app.loadIdeas();
+    check([reader.hidden,dash.classList.contains('reading'),card(first).open],[true,false,true],'narrow screens keep the inline card');
+    Object.assign(row,saved);w.matchMedia=savedMatch;click('collapse-all');await app.loadIdeas();
   }
   app.openIdeaDialog(app.state.ideas.at(-1));
   const editor=d.querySelector('#modal-body textarea');editor.value='# Revised Markdown\n\n$x^2$';editor.dispatchEvent(new w.Event('input'));

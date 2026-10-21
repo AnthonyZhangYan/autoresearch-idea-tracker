@@ -98,7 +98,7 @@ w.HTMLDialogElement.prototype.close = function(){this.open = false;};
 w.supabase = {createClient:() => client};
 w.eval(script + '\nwindow.__app = {state,fitInlineMath};');
 for (let n = 0; n < 200 && !(w.__app.state.loaded && d.querySelector('.idea')); n++) await new Promise(r => setTimeout(r,5));
-d.getElementById('expand-all').click();
+for (const card of d.querySelectorAll('.idea')) { card.open = true; card.dispatchEvent(new w.Event('toggle')); }
 await new Promise(r => setTimeout(r,50));
 check(!!d.querySelector('.idea[open] .description .katex-display'),true,'synthetic idea rendered with display math');
 w.clearInterval(w.__app.state.pollTimer);
@@ -179,6 +179,39 @@ dialogMeasure.textContent = `(${function measureDialog() {
 }})();`;
 dialogCopy.querySelector('body').append(dialogMeasure);
 await writeFile(join(dir,'dialog.html'),'<!doctype html>\n' + dialogCopy.outerHTML);
+// Wide-screen reading mode: the same idea selected, its Markdown in the right
+// pane and its discussion in the list. CSS alone decides whether the pane shows,
+// so the same DOM is also measured below the breakpoint.
+w.matchMedia = query => ({matches:query === '(min-width: 1100px)',addEventListener(){}});
+d.querySelector('.idea > summary').click();
+check([d.getElementById('reader').hidden,!!d.querySelector('#reader-body .katex-display')],[false,true],'reading pane rendered for the selected idea');
+const readingCopy = d.documentElement.cloneNode(true);
+readingCopy.querySelectorAll('script,meta[http-equiv]').forEach(el => el.remove());
+readingCopy.querySelectorAll('link[rel=stylesheet]').forEach(el => el.setAttribute('href','katex.min.css'));
+const readingMeasure = d.createElement('script');
+readingMeasure.textContent = `window.fitInlineMath = ${w.__app.fitInlineMath.toString()};\n(${function measureReading() {
+  Promise.all([document.fonts.ready,new Promise(r => setTimeout(r,300))]).then(() => {
+    window.fitInlineMath();
+    const root = document.documentElement, reader = document.getElementById('reader'), list = document.getElementById('ideas');
+    const card = document.querySelector('.idea[open]'), box = reader.getBoundingClientRect(), side = list.getBoundingClientRect(), style = getComputedStyle(reader);
+    const clipped = [];
+    for (const el of reader.querySelectorAll('p,li,h1,h2,h3,blockquote,.katex,.katex-display,pre,table')) {
+      const r = el.getBoundingClientRect();
+      let scrolls = false;
+      for (let node = el.parentElement; node && node !== reader; node = node.parentElement) if (['auto','scroll'].includes(getComputedStyle(node).overflowX)) scrolls = true;
+      if (r.width && !scrolls && (r.right > box.right + 1 || r.left < box.left - 1)) clipped.push(el.tagName.toLowerCase() + ' "' + el.textContent.trim().slice(0,30) + '"');
+    }
+    const out = document.createElement('pre'); out.id = 'layout-result';
+    out.textContent = JSON.stringify({viewport:root.clientWidth,pageOverflow:root.scrollWidth - root.clientWidth,
+      readerShown:style.display !== 'none',cardTextHidden:getComputedStyle(card.querySelector('.description')).display === 'none',
+      sideBySide:side.right <= box.left && box.right <= root.clientWidth,listWidth:Math.round(side.width),
+      sticky:style.position === 'sticky' && box.height <= innerHeight - 31,clipped,displayCount:reader.querySelectorAll('.katex-display').length,
+      wideScroll:[...reader.querySelectorAll('.katex-display,pre,table')].filter(el => el.scrollWidth > el.clientWidth + 1).every(el => ['auto','scroll'].includes(getComputedStyle(el).overflowX))});
+    document.body.append(out);
+  });
+}})();`;
+readingCopy.querySelector('body').append(readingMeasure);
+await writeFile(join(dir,'reading.html'),'<!doctype html>\n' + readingCopy.outerHTML);
 const runChrome = (page,width,height = 3000) => new Promise((done,fail) => execFile(chrome,['--headless=new','--disable-gpu','--no-first-run','--hide-scrollbars','--allow-file-access-from-files',
   `--window-size=${width},${height}`,'--virtual-time-budget=8000','--dump-dom',pathToFileURL(join(dir,page)).href],{maxBuffer:64 * 1024 * 1024},(error,stdout) => {
   if (error) return fail(error);
@@ -201,9 +234,15 @@ try {
     }
     check(result.cards.length,1,`${label}: the expanded idea was measured`);
   }
+  const reading = await runChrome('reading.html',1280,800);
+  check([reading.pageOverflow,reading.readerShown,reading.cardTextHidden,reading.sideBySide,reading.listWidth >= 420,reading.sticky],[0,true,true,true,true,true],
+    `wide reading mode: list on the left, text in a sticky pane on the right, no page overflow (${JSON.stringify(reading)})`);
+  check([reading.clipped,reading.displayCount,reading.wideScroll],[[],2,true],'wide reading mode: Markdown and math fit the pane; wide blocks scroll');
+  const narrowReading = await runChrome('reading.html',1000,800);
+  check([narrowReading.pageOverflow,narrowReading.readerShown,narrowReading.cardTextHidden],[0,false,false],'below the breakpoint the card shows its text inline and the pane stays hidden');
   for (const [label,width,height] of [['desktop',1280,800],['phone',390,700]]) {
     const dialog = await runChrome('dialog.html',width,height);
     check(dialog,{bodyScrolled:true,dialogScroll:0,closeVisible:true,fitsViewport:true},`${label}: a long dialog scrolls its body while the title and close button stay visible`);
   }
-  console.log(`PASS: ${checks} real-browser layout checks (desktop 1280px, phone 390px) with synthetic Chinese/LaTeX Markdown, using ${chrome}.`);
+  console.log(`PASS: ${checks} real-browser layout checks (desktop 1280px, reading pane 1280/1000px, phone 390px) with synthetic Chinese/LaTeX Markdown, using ${chrome}.`);
 } finally { w.close(); await rm(dir,{recursive:true,force:true}); }
