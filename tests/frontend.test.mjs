@@ -195,7 +195,7 @@ installMarkdownLibraries(w);
 w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
 w.HTMLDialogElement.prototype.close=function(){this.open=false;};
 w.supabase={createClient:()=>client};
-w.eval(script+'\nwindow.__app = {state,loadIdeas,loadCurrentUser,renderDashboard,openIdeaDialog,openResultDialog,confirmAction,joinIdea,mutate,openHistory,safeURL,closeModal,filteredIdeas,renderMarkdown,suggestedMarkdownTitle,readMarkdownFile};');
+w.eval(script+'\nwindow.__app = {state,loadIdeas,loadCurrentUser,renderDashboard,openIdeaDialog,openResultDialog,confirmAction,joinIdea,mutate,openHistory,safeURL,closeModal,filteredIdeas,renderMarkdown,suggestedMarkdownTitle,readMarkdownFile,markdownFileName};');
 const app=w.__app;
 const wait=async condition=>{for(let n=0;n<200;n++){if(condition())return;await new Promise(resolve=>setTimeout(resolve,5));}throw Error('Timed out waiting for DOM test condition');};
 const click = id => d.getElementById(id).click();
@@ -1036,6 +1036,25 @@ try {
   d.querySelector('#modal-body input[type=text]').value='Metadata-only edit';submit();
   await wait(()=>!app.state.pending && !d.getElementById('modal').open);
   check(calls.at(-1).args.p_description,markdown,'metadata-only edit preserves original line endings');
+  // Download .md: the stored Markdown byte for byte, under the idea's number and title.
+  {
+    const downloadIdea=app.state.ideas.find(i=>i.id===markdownIdea.id),downloads=[],savedCreate=w.URL.createObjectURL,savedRevoke=w.URL.revokeObjectURL;
+    w.URL.createObjectURL=blob=>{downloads.push({blob});return 'blob:synthetic-download';};w.URL.revokeObjectURL=()=>{};
+    const catchDownload=event=>{const a=event.target.closest?.('a[download]');if(a){event.preventDefault();Object.assign(downloads.at(-1),{name:a.download,href:a.getAttribute('href')});}};
+    d.addEventListener('click',catchDownload,true);
+    const card=[...d.querySelectorAll('.idea[data-idea-id]')].find(c=>c.dataset.ideaId===downloadIdea.id);
+    const downloadButton=[...card.querySelectorAll('.idea-actions button')].find(b=>b.textContent==='Download .md');
+    check([!!downloadButton,downloadButton?.dataset.mutation],[true,undefined],'Download .md offered on the idea and not treated as a write');
+    const callsBefore=calls.length;downloadButton.click();
+    const saved=downloads.at(-1),bytes=new Uint8Array(await new Promise(r=>{const reader=new w.FileReader();reader.onload=()=>r(reader.result);reader.readAsArrayBuffer(saved.blob);}));
+    check([saved.name,saved.href,saved.blob.type],[`${'IDEA-'+String(downloadIdea.idea_number).padStart(3,'0')} Metadata-only edit.md`,'blob:synthetic-download','text/markdown;charset=utf-8'],'file named after the idea number and title');
+    check([...bytes],[...Buffer.from(markdown,'utf8')],'downloaded file is the stored Markdown byte for byte (BOM and CRLF kept)');
+    check([calls.length,d.querySelectorAll('a[download]').length],[callsBefore,0],'download makes no request and leaves no link behind');
+    check(app.markdownFileName({idea_number:7,title:' a/b:c*d?"e"<f>|g\\h. '}),'IDEA-007 a b c d e f g h.md','unsafe filename characters replaced');
+    check(app.markdownFileName({idea_number:12345,title:'超长标题'.repeat(40)}),'IDEA-12345 '+'超长标题'.repeat(20)+'.md','long titles shortened by character');
+    check(app.markdownFileName({idea_number:3,title:'...'}),'IDEA-003.md','title without usable characters falls back to the number');
+    d.removeEventListener('click',catchDownload,true);w.URL.createObjectURL=savedCreate;w.URL.revokeObjectURL=savedRevoke;
+  }
   app.openIdeaDialog(app.state.ideas.at(-1));
   const editor=d.querySelector('#modal-body textarea');editor.value='# Revised Markdown\n\n$x^2$';editor.dispatchEvent(new w.Event('input'));
   await wait(()=>d.querySelector('.markdown-preview h1')?.textContent==='Revised Markdown');

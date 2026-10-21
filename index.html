@@ -322,6 +322,20 @@ async function readMarkdownFile(file) {
   if (utf8Bytes(source) > MAX_MARKDOWN_BYTES) throw new Error('Markdown must be at most 1 MiB of UTF-8 text.');
   return {source,...suggestedMarkdownTitle(source,file.name)};
 }
+// Saves the description exactly as stored (BOM, line endings and all) as a
+// local .md file named after the idea; nothing is sent anywhere.
+function markdownFileName(idea) {
+  const title = Array.from(String(idea.title || '').replace(/[\\/:*?"<>|\u0000-\u001f\u007f]+/g,' ').replace(/\s+/g,' ').trim())
+    .slice(0,80).join('').trim().replace(/^\.+|[. ]+$/g,'');
+  return `${ideaNumber(idea.idea_number)}${title ? ' ' + title : ''}.md`;
+}
+function downloadMarkdown(idea) {
+  const url = URL.createObjectURL(new Blob([idea.description],{type:'text/markdown;charset=utf-8'}));
+  const link = document.createElement('a');
+  link.href = url; link.download = markdownFileName(idea); link.hidden = true;
+  document.body.append(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url),10000);
+}
 function experimentLink(value) {
   const url = safeURL(value);
   if (!url) return node('span','muted','Experiment link unavailable');
@@ -987,6 +1001,7 @@ function updateCard(card, idea) {
   const mine = myParticipation(idea);
   if (!mine || mine.status === 'withdrawn') workflow.append(button(mine ? 'Rejoin idea' : 'Join idea','primary',() => joinIdea(idea),true));
   workflow.append(button('History','quiet',() => openHistory(idea)));
+  if (idea.description) workflow.append(button('Download .md','quiet',() => downloadMarkdown(idea)));
   if (canEditIdea(idea)) management.append(button('Edit','quiet',() => openIdeaDialog(idea),true));
   if (canDeleteIdea(idea)) management.append(button('Delete','quiet danger',() => confirmAction('delete',idea),true));
   [...workflow.children,...management.children].forEach(b => { b.dataset.focusKey = `${idea.id}-${b.textContent}`; });
