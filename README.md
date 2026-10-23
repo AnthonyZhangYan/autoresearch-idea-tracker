@@ -46,6 +46,7 @@ GitHub Pages: index.html (HTML + CSS + vanilla JavaScript)
 | `supabase/migrations/allow_creator_delete_untouched_idea.sql` | Transactional RPC migration allowing an idea's creator to delete it while nobody has joined or commented (section 9C) |
 | `supabase/migrations/allow_member_update_result.sql` | Transactional RPC migration letting members change their own submitted result (section 9E) |
 | `supabase/migrations/raise_description_limit.sql` | Transactional migration raising the idea description limit from 100 KiB to 1 MiB (section 9F) |
+| `supabase/migrations/add_comment_images.sql` | Additive, transactional migration creating the private Storage bucket for comment images (screenshots) and its member-only read/upload policies (section 9G) |
 | `supabase/migrations/add_notification_reads.sql` | Additive, transactional migration adding the per-member notification read position (`notification_reads`) and `mark_notifications_read` (section 9D) |
 | `tests/fixtures/schema_v2_0.sql` | Frozen copy of the deployed V2 schema before replies, used only to test that migration |
 | `tests/frontend.test.mjs` | Syntax and DOM integration tests using a simulated transport |
@@ -75,9 +76,9 @@ No production Node server, framework, package installation, or build system is r
 
 ## Markdown ideas and comments
 
-Any member can create an idea manually or choose **Import one .md file** in the Publish idea dialog. A file always represents **one** idea. Multiple headings, sections, code blocks, or horizontal rules are never split into separate ideas. There is no bulk import. Comments use the same Markdown, LaTeX and sanitization pipeline, with a 20 KiB limit per comment.
+Any member can create an idea manually or choose **Import one .md file** in the Publish idea dialog. A file always represents **one** idea. Multiple headings, sections, code blocks, or horizontal rules are never split into separate ideas. There is no bulk import. Comments use the same Markdown, LaTeX and sanitization pipeline, with a 20 KiB limit per comment. Comments and replies can also contain images: paste a screenshot, drop an image or use **Image** (PNG, JPEG, GIF or WebP, at most 5 MiB each; section 9G).
 
-1. Open **Publish idea**, then choose one local UTF-8 `.md` file, at most **1 MiB (1,048,576 bytes)**. A file stays on the computer until its text is submitted with the form; there is no file upload endpoint or Supabase Storage bucket.
+1. Open **Publish idea**, then choose one local UTF-8 `.md` file, at most **1 MiB (1,048,576 bytes)**. A file stays on the computer until its text is submitted with the form; the file itself is never uploaded.
 2. The first Markdown H1 supplies the suggested title. Both `# Title` and Setext H1 (`Title` followed by `=====`) work; heading-like lines in code blocks are ignored. If no H1 exists, the filename without `.md` is used. A suggestion over 200 characters is shortened with a notice, while the full source stays unchanged.
 3. Edit the suggested title, Markdown, Monday date, or priority as needed. The source editor and **Live preview** appear side by side on desktop and stack on narrow screens. Preview updates shortly after typing.
 4. Review the preview, then explicitly click **Publish idea**. **Choosing a file never publishes or creates a database row.** Importing into a nonempty draft asks before replacing that draft. Cancel leaves the database unchanged.
@@ -120,7 +121,7 @@ Rendering security and scope:
 
 - Raw HTML in Markdown is displayed as text. All generated Markdown and KaTeX HTML passes through **DOMPurify** before its sanitized DOM fragment is inserted. Titles, notes, history snapshots, errors, and other ordinary fields still use `textContent`.
 - KaTeX uses `trust: false`, bounded expansion/size, and fresh macros for each expression. HTML injection commands, executable links, and external image commands are not trusted. See [KaTeX security options](https://katex.org/docs/options.html) and [DOMPurify](https://github.com/cure53/DOMPurify).
-- Rendered links are limited to absolute HTTP(S) URLs, opened with `noopener noreferrer`. Relative/local-file links are shown as text because an imported local file has no published asset base. Image syntax remains in the stored source but displays as an image label; embedded/remote images and file attachments are outside this MVP.
+- Rendered links are limited to absolute HTTP(S) URLs, opened with `noopener noreferrer`. Relative/local-file links are shown as text because an imported local file has no published asset base. Image syntax remains in the stored source but displays as an image label, and remote images are never fetched. The only images displayed are uploads to the private `comment-images` bucket (section 9G). They are referenced as `attachment:<uid>/<uuid>.<png|jpg|gif|webp>`, downloaded with the member's session, and shown from a `blob:` URL typed by the file extension, never by the server's content type.
 - Missing parser/sanitizer/math libraries cause a safe original-text fallback, never unsanitized rendering. The import action requires the rendering libraries to be loaded so that title extraction and preview are available; manual source entry still works. No Markdown rendering failure changes authentication or database permissions.
 - Long documents are rendered when their cards expand. No research text is sent to a Markdown or math rendering service; rendering happens in the browser.
 
@@ -798,6 +799,26 @@ Data-preserving. `supabase/migrations/raise_description_limit.sql` replaces only
 4. **Verify live** by importing a disposable Markdown file between 100 KiB and 1 MiB: it publishes, renders, and opens for editing; then delete it.
 
 Large descriptions make the page heavier: every refresh downloads all ideas with their full text, and the preview and expanded card render the whole document (very math-heavy documents render more slowly). Notifications and Realtime are unaffected: Realtime events only trigger a refresh, and notifications read small fields only.
+
+## 9G. Add images (screenshots) to comments — only after approval
+
+Additive. Members can paste a screenshot into a comment or reply box, drop an image file on it, or choose files with **Image**. Each image is uploaded to the private Supabase Storage bucket `comment-images` as `<member uid>/<random uuid>.<ext>`. The comment stores only a Markdown reference, `![name](attachment:<uid>/<uuid>.png)`, so the 20 KiB comment limit, the RPCs and the activity history are unchanged. A marker holds the image's place while it uploads, and a comment cannot be posted until every upload has finished.
+
+`supabase/migrations/add_comment_images.sql` changes no table, row, RPC or public RLS policy, in one transaction. It creates (or re-tightens) the bucket: private, PNG/JPEG/GIF/WebP only, 5 MiB per file. It adds two policies on `storage.objects`: active members can read every image in the bucket, and can upload only into their own folder with a well-formed name. There is no UPDATE or DELETE policy, so an image can never be replaced or deleted through the API, not even by the PI. Like a removed comment's text, an image stays readable to members after its comment is removed. An image that was uploaded but never posted (a discarded draft) also stays in the bucket. It is safe to rerun. It requires the V2 schema and Supabase Storage, and works with or without sections 9–9F.
+
+1. **Review** the migration.
+2. **Migrate first.** In the SQL Editor, as `postgres`, run the whole migration file once. Fresh installs run it after `schema.sql`; it is not part of `schema.sql` because plain PostgreSQL has no Storage schema. Check it with:
+
+   ```sql
+   select id, public, file_size_limit, allowed_mime_types from storage.buckets where id = 'comment-images';
+   select policyname, cmd from pg_policies where schemaname = 'storage' and policyname like '%comment_images';
+   ```
+
+   The bucket must be `public = false` with limit `5242880`, and there must be exactly two policies, `SELECT` and `INSERT`. Members do not see any change yet.
+3. **Then deploy the frontend:** commit and `git push origin main`, wait for GitHub Pages, and hard-reload. If the page is deployed first, an upload fails with a message naming this migration; the rest of the draft is kept.
+4. **Verify live:** paste a screenshot into a comment on a disposable idea, post it, and confirm that a second member sees it. A signed-out browser opening `https://kgfybebpxpdkiouofyow.supabase.co/storage/v1/object/public/comment-images/<path>` must get an error, because the bucket is not public.
+
+Images are downloaded with the member's session and shown from `blob:` URLs, so the Content-Security-Policy now allows `img-src blob:`. Each image is downloaded once per page load and freed on sign-out. Supabase's free plan includes 1 GB of Storage.
 
 ## Database API reference
 

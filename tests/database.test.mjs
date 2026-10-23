@@ -32,9 +32,9 @@ try {
   await db.initialise(); await db.start();
   const admin = db.getPgClient(); await admin.connect(); clients.push(admin);
   await admin.query(`create role anon nologin; create role authenticated nologin; ${authStub}`);
-  const [schema, exportSQL, dropArchiveSQL, v1Schema, repliesMigration, v20Schema, creatorDeleteMigration, notifyMigration, authorDeleteMigration, resultEditMigration, limitMigration] = await Promise.all([read('../supabase/schema.sql'),read('../supabase/export_v1_backup.sql'),
-    read('../supabase/drop_v1_archive.sql'),read('./fixtures/schema_v1.sql'),read('../supabase/migrations/add_comment_replies.sql'),read('./fixtures/schema_v2_0.sql'),read('../supabase/migrations/allow_creator_delete_untouched_idea.sql'),read('../supabase/migrations/add_notification_reads.sql'),read('../supabase/migrations/allow_comment_author_delete.sql'),read('../supabase/migrations/allow_member_update_result.sql'),read('../supabase/migrations/raise_description_limit.sql')]);
-  for (const [name,sql] of [['schema.sql',schema],['export',exportSQL],['archive cleanup',dropArchiveSQL],['replies migration',repliesMigration],['author deletion migration',authorDeleteMigration],['creator deletion migration',creatorDeleteMigration],['notification migration',notifyMigration],['result edit migration',resultEditMigration],['description limit migration',limitMigration]]) {
+  const [schema, exportSQL, dropArchiveSQL, v1Schema, repliesMigration, v20Schema, creatorDeleteMigration, notifyMigration, authorDeleteMigration, resultEditMigration, limitMigration, imagesMigration] = await Promise.all([read('../supabase/schema.sql'),read('../supabase/export_v1_backup.sql'),
+    read('../supabase/drop_v1_archive.sql'),read('./fixtures/schema_v1.sql'),read('../supabase/migrations/add_comment_replies.sql'),read('./fixtures/schema_v2_0.sql'),read('../supabase/migrations/allow_creator_delete_untouched_idea.sql'),read('../supabase/migrations/add_notification_reads.sql'),read('../supabase/migrations/allow_comment_author_delete.sql'),read('../supabase/migrations/allow_member_update_result.sql'),read('../supabase/migrations/raise_description_limit.sql'),read('../supabase/migrations/add_comment_images.sql')]);
+  for (const [name,sql] of [['schema.sql',schema],['export',exportSQL],['archive cleanup',dropArchiveSQL],['replies migration',repliesMigration],['author deletion migration',authorDeleteMigration],['creator deletion migration',creatorDeleteMigration],['notification migration',notifyMigration],['result edit migration',resultEditMigration],['description limit migration',limitMigration],['comment image migration',imagesMigration]]) {
     check(/```|\\[_*<>]|&(?:lt|gt);/.test(sql),false,`${name} is plain SQL, not escaped Markdown`);
     check(/\bcascade\b/i.test(sql.replace(/--.*$/gm,'')),false,`${name} uses no CASCADE`);
   }
@@ -841,6 +841,51 @@ try {
   await notV2.query('rollback');
   await rejects(() => notV2.query(limitMigration),/requires the V2 schema/,'description-limit migration refuses a missing V2 schema');
   await notV2.query('rollback');
+  await rejects(() => notV2.query(imagesMigration),/requires the V2 schema/,'comment-image migration refuses a missing V2 schema');
+  await notV2.query('rollback');
+
+  // ---- Comment images (Supabase Storage). A minimal stand-in for Storage's
+  // tables, with Supabase's grants: clients may touch storage.objects and only
+  // the RLS policies decide what happens.
+  await rejects(() => admin.query(imagesMigration),/requires Supabase Storage/,'comment-image migration refuses a database without Storage');
+  await admin.query('rollback');
+  await admin.query(`create schema storage;
+    create table storage.buckets (id text primary key, name text not null, public boolean default false, file_size_limit bigint, allowed_mime_types text[]);
+    create table storage.objects (id uuid primary key default gen_random_uuid(), bucket_id text references storage.buckets(id),
+      name text not null, owner_id text default current_setting('request.jwt.claim.sub',true), unique (bucket_id, name));
+    alter table storage.objects enable row level security;
+    grant usage on schema storage to anon, authenticated;
+    grant select, insert, update, delete on storage.objects to anon, authenticated;
+    insert into storage.buckets values ('comment-images','comment-images',true,null,null), ('other','other',false,null,null);`);
+  const storagePolicies = async () => (await admin.query("select policyname, cmd, roles::text from pg_policies where schemaname='storage' order by policyname")).rows;
+  await rejects(() => admin.query(imagesMigration.replace(/commit;\s*$/i,()=>"do $$ begin raise exception 'Injected migration failure'; end; $$; commit;")),/Injected migration failure/,'comment-image migration is transactional');
+  await admin.query('rollback');
+  check([await storagePolicies(),(await admin.query("select public from storage.buckets where id='comment-images'")).rows[0].public],[[],true],'failed comment-image migration changes nothing');
+  const publicPolicies = async () => (await admin.query("select policyname, cmd, roles, qual, with_check from pg_policies where schemaname='public' order by tablename, policyname")).rows;
+  const beforeImages = await publicPolicies();
+  await admin.query(imagesMigration); await admin.query(imagesMigration);
+  check((await admin.query("select public, file_size_limit::int, allowed_mime_types from storage.buckets where id='comment-images'")).rows[0],
+    {public:false,file_size_limit:5242880,allowed_mime_types:['image/png','image/jpeg','image/gif','image/webp']},'repeatable migration makes the bucket private, 5 MiB, raster images only');
+  check(await storagePolicies(),[{policyname:'members_read_comment_images',cmd:'SELECT',roles:'{authenticated}'},{policyname:'members_upload_comment_images',cmd:'INSERT',roles:'{authenticated}'}],
+    'members may only read and upload: no UPDATE or DELETE policy');
+  check(await publicPolicies(),beforeImages,'RLS policies on public tables unchanged by the comment-image migration');
+  const image = (owner,ext = 'png') => `${users[owner]}/${randomUUID()}.${ext}`;
+  const upload = (client,name,bucket = 'comment-images') => client.query('insert into storage.objects (bucket_id, name) values ($1,$2)',[bucket,name]);
+  const yanImage = image('Yan');
+  await upload(yan,yanImage); await upload(junqi,image('Junqi','webp')); checks++;
+  for (const [client,name,label] of [[yan,image('Junqi'),'into another member’s folder'],[yan,image('Yan','svg'),'as SVG'],[yan,image('Yan','html'),'as HTML'],
+    [yan,`${users.Yan}/../${randomUUID()}.png`,'with a crafted path'],[yan,`${users.Yan}/${randomUUID()}.png/x.png`,'into a subfolder'],[outsider,image('Outsider'),'as a non-member']])
+    await rejects(() => upload(client,name),/row-level security/,`no upload ${label}`);
+  await rejects(() => upload(yan,image('Yan'),'other'),/row-level security/,'no upload into another bucket');
+  await rejects(() => upload(anon,image('Yan')),/row-level security/,'no anonymous upload');
+  for (const client of [shibo,junqi,yifan]) check((await client.query("select name from storage.objects where bucket_id='comment-images' order by name")).rowCount,2,'every member sees every comment image');
+  for (const client of [outsider,anon]) check((await client.query('select * from storage.objects')).rowCount,0,'outsiders and anonymous users see no images');
+  check([(await yan.query("update storage.objects set name=$2 where name=$1",[yanImage,image('Yan')])).rowCount,
+    (await yan.query('delete from storage.objects where name=$1',[yanImage])).rowCount,(await shibo.query('delete from storage.objects')).rowCount],[0,0,0],'images cannot be renamed, replaced or deleted, even by the PI');
+  await admin.query('update public.profiles set active=false where id=$1',[users.Yifan]);
+  check((await yifan.query('select * from storage.objects')).rowCount,0,'a deactivated member sees no images');
+  await rejects(() => upload(yifan,image('Yifan')),/row-level security/,'a deactivated member cannot upload');
+  await admin.query('update public.profiles set active=true where id=$1',[users.Yifan]);
 
   console.log(`PASS: ${checks} PostgreSQL checks, including the 1 MiB description limit and its migration, notification read state and its migration, creator/PI idea deletion rules and their migration, threaded replies and their additive migration, concurrent participation, parallel independent results, comment idempotency, publication WAL filtering, parent-before-child deletion races, and the backup-verified single-transaction V1 upgrade. Hosted Supabase was not used.`);
 } finally {

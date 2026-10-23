@@ -45,6 +45,7 @@ let comments = [{id:'comment-1',idea_id:'idea-3',author_id:'member-2',body:'Init
   client_request_id:'00000000-0000-4000-8000-000000000001',created_at:'2026-10-13T16:00:00Z',removed_at:null,removed_by:null}];
 let events = [], currentId = 'member-0', authCallback, channel, rpcError, loseNextResponse = false, readsFail = false, delayRead, calls = [], removed = 0, serial = 100;
 let notificationReads = [], readCalls = [], notificationsFail = false, reads = [];
+let stored = new Map(), storageCalls = [], uploadError = null, holdUpload = null, imageCleanup;
 const session = () => currentId ? {user:{id:currentId},access_token:'synthetic-test-token'} : null;
 const rowsFor = table => ({profiles,ideas,idea_participants:participants,idea_comments:comments,notification_reads:notificationReads})[table] || [...events].reverse();
 // Applies a PostgREST select list, including JSON paths such as "title:new_state->>title".
@@ -170,6 +171,20 @@ const client = {
     async signOut(){currentId=null;setTimeout(()=>authCallback('SIGNED_OUT',null),0);return {error:null};}
   },
   realtime:{async setAuth(){}},
+  // Private comment-images bucket: uploads never overwrite, downloads need an existing object.
+  storage:{from:bucket=>({
+    async upload(path,file,options){
+      storageCalls.push({op:'upload',bucket,path,...clone(options)});
+      if (holdUpload) await holdUpload;
+      if (uploadError) return {data:null,error:uploadError};
+      if (stored.has(path)) return {data:null,error:{message:'The resource already exists'}};
+      stored.set(path,file);return {data:{path},error:null};
+    },
+    async download(path){
+      storageCalls.push({op:'download',bucket,path});
+      return stored.has(path) ? {data:stored.get(path),error:null} : {data:null,error:{message:'Object not found'}};
+    }
+  })},
   channel(){ channel={handlers:[],on(type,filter,callback){this.handlers.push({filter,callback});return this;},subscribe(callback){this.status=callback;setTimeout(()=>callback('SUBSCRIBED'),0);return this;}}; return channel; },
   async removeChannel(){removed++;},
   async rpc(name,args){
@@ -1035,7 +1050,7 @@ try {
     await wait(()=>!d.querySelector('#modal-body form')?.dataset.importing);
   };
   app.openIdeaDialog();const callsBeforeImport=calls.length,ideasBeforeImport=ideas.length;
-  check(d.querySelector('input[type=file]').multiple,false,'single file picker');
+  check(d.querySelector('#modal-body input[type=file]').multiple,false,'single file picker');
   await importIntoForm([file]);
   check(calls.length,callsBeforeImport,'import never publishes');check(ideas.length,ideasBeforeImport,'import creates no rows');
   check(d.querySelector('#modal-body input[type=text]').value,'Suggested research title','import fills editable suggested title');
@@ -1158,10 +1173,76 @@ try {
     check(app.state.commentsByIdea.get('idea-3').some(c=>c.body==='Committed during a slow load'),true,'a check during a load runs after it and catches a change the load missed');
   }
 
+  // ---- Comment images: private bucket, paste/drop/pick upload, blob: display.
+  {
+    const savedCreate=w.URL.createObjectURL,savedRevoke=w.URL.revokeObjectURL,revoked=[];let blobs=0;
+    w.URL.createObjectURL=blob=>`blob:synthetic-image-${++blobs}-${blob.type}`;w.URL.revokeObjectURL=url=>revoked.push(url);
+    const uid='11111111-1111-4111-8111-111111111111',existing=`${uid}/22222222-2222-4222-8222-222222222222.png`;
+    stored.set(existing,new w.Blob(['synthetic png'],{type:'text/html'}));
+    const box=d.createElement('div');
+    app.renderMarkdown(box,`Before\n\n![loss curve](attachment:${existing})\n\n![remote](https://example.org/track.png) ![bad](attachment:../${existing}) ![svg](attachment:${uid}/22222222-2222-4222-8222-222222222222.svg)`);
+    await wait(()=>box.querySelector('img'));
+    const shown=box.querySelector('.attachment a img');
+    check([shown.alt,shown.getAttribute('src'),shown.parentElement.target,shown.parentElement.rel],['loss curve','blob:synthetic-image-1-image/png','_blank','noopener'],'attachment image shown from a blob: URL typed by its extension, not the server');
+    check([box.querySelectorAll('img').length,box.textContent.includes('[Image: remote]'),box.textContent.includes('[Image: bad]'),box.textContent.includes('[Image: svg]'),box.querySelector('.attachment[title]')],[1,true,true,true,null],'remote, malformed and non-raster images stay text labels');
+    check(storageCalls.map(c=>[c.op,c.bucket,c.path]),[['download','comment-images',existing]],'only the valid attachment is downloaded, from the private bucket');
+    app.renderMarkdown(box,`![again](attachment:${existing})`);await wait(()=>box.querySelector('img'));
+    check(storageCalls.length,1,'a rerendered image is served from the cache');
+    const missing=`${uid}/33333333-3333-4333-8333-333333333333.jpg`;
+    app.renderMarkdown(box,`![gone](attachment:${missing})`);await wait(()=>box.textContent.includes('[Image unavailable: gone]'));
+    app.renderMarkdown(box,`![gone](attachment:${missing})`);await wait(()=>storageCalls.length===3);
+    check(storageCalls.at(-1).path,missing,'a failed download is retried on the next render');
+
+    const target=d.querySelector('.idea .idea-number').textContent,targetId=app.state.ideas.find(i=>card(target)&&i.idea_number===Number(target.slice(5))).id;
+    openCard(target);storageCalls=[];
+    const realUser=app.state.userId;app.state.userId=uid; // Auth user IDs are UUIDs; the synthetic profiles are not.
+    const input=composerOf(target),form=input.closest('.composer');
+    check(labels(form).includes('Image'),true,'composer offers an Image button');
+    const paste=(files,types=['Files'])=>{const event=new w.Event('paste',{bubbles:true,cancelable:true});
+      Object.defineProperty(event,'clipboardData',{value:{files,types}});input.dispatchEvent(event);return event;};
+    type(target,'Result:');input.setSelectionRange(7,7);
+    let release;holdUpload=new Promise(resolve=>release=resolve);
+    const pasted=paste([new w.File(['png bytes'],'image.png',{type:'image/png'})]);
+    check(pasted.defaultPrevented,true,'a pasted screenshot is intercepted');
+    check(/^Result:\n!\[Uploading image…\]\([0-9a-f-]{36}\)\n$/.test(input.value),true,'a marker holds the image place on its own line');
+    const beforeEarlyPost=calls.length;postIn(target);
+    check([calls.length,composerError(target)],[beforeEarlyPost,'Wait for the image upload to finish before posting.'],'cannot post while an image uploads');
+    release();holdUpload=null;await wait(()=>!input.value.includes('Uploading'));
+    const upload=storageCalls.find(c=>c.op==='upload');
+    check([upload.bucket,upload.contentType,upload.upsert,new RegExp(`^${uid}/[0-9a-f-]{36}\\.png$`).test(upload.path)],['comment-images','image/png',false,true],'upload goes into the member’s own folder without overwriting');
+    check(input.value,`Result:\n![image](attachment:${upload.path})\n`,'marker replaced by the attachment reference');
+    check(app.state.commentDrafts.get(targetId).text,input.value,'draft keeps the reference');
+    check(paste([new w.File(['x'],'chart.png',{type:'image/png'})],['text/plain','Files']).defaultPrevented,false,'pasted text that also carries a picture stays text');
+    const picker=form.querySelector('input[type=file]');
+    check([picker.multiple,picker.accept],[true,'image/png,image/jpeg,image/gif,image/webp'],'image picker accepts several raster images');
+    const pick=files=>{Object.defineProperty(picker,'files',{configurable:true,value:files});picker.dispatchEvent(new w.Event('change'));};
+    const uploadsBefore=storageCalls.length;
+    pick([new w.File(['<svg/>'],'evil.svg',{type:'image/svg+xml'})]);
+    check(composerError(target),'evil.svg is not a PNG, JPEG, GIF or WebP image.','non-raster file refused');
+    const huge=new w.File(['x'],'huge.png',{type:'image/png'});Object.defineProperty(huge,'size',{value:5242881});pick([huge]);
+    check([composerError(target),storageCalls.length],['huge.png is larger than 5 MiB.',uploadsBefore],'oversized image refused before uploading');
+    uploadError={message:'Bucket not found'};const valueBefore=input.value;input.setSelectionRange(valueBefore.length,valueBefore.length);
+    const drop=new w.Event('drop',{bubbles:true,cancelable:true});
+    Object.defineProperty(drop,'dataTransfer',{value:{files:[new w.File(['jpg'],'photo.jpg',{type:'image/jpeg'})],types:['Files']}});
+    input.dispatchEvent(drop);await wait(()=>!input.value.includes('Uploading'));uploadError=null;
+    check([drop.defaultPrevented,input.value,composerError(target).includes('add_comment_images.sql')],[true,valueBefore,true],'a failed upload removes its marker and names the migration');
+    app.state.userId=realUser;
+    postIn(target);await settled();
+    check(calls.at(-1).args.p_body,`Result:\n![image](attachment:${upload.path})\n`,'the comment stores only the reference');
+    await wait(()=>thread(target).querySelector('.comment .attachment img'));
+    check(storageCalls.filter(c=>c.op==='download').length,0,'the uploader sees the image without downloading it again');
+    imageCleanup=async()=>{
+      await wait(()=>revoked.length===2);
+      check(app.state.attachments.size,0,'sign-out discards and revokes the images it downloaded or uploaded');
+      w.URL.createObjectURL=savedCreate;w.URL.revokeObjectURL=savedRevoke;
+    };
+  }
+
   let releaseLate;delayRead=new Promise(resolve=>releaseLate=resolve);const late=app.loadIdeas();
   await app.loadCurrentUser(null);releaseLate();await late;
   check(d.getElementById('dashboard').hidden,true,'late response cannot resurrect logged-out dashboard');
   check(app.state.ideas.length,0,'late response cannot restore private data');
   check(d.getElementById('login-view').hidden,false,'logout view');
+  await imageCleanup();
   console.log(`PASS: ${checks} syntax/DOM integration checks. Transport was simulated; no live Auth or Realtime claims.`);
 } finally { w.close(); }

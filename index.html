@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#101216">
   <meta name="description" content="The PML4SC Lab workspace for shared research ideas, experiment progress, and results.">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net/npm/katex@0.19.0/dist/fonts/; connect-src https://kgfybebpxpdkiouofyow.supabase.co wss://kgfybebpxpdkiouofyow.supabase.co; img-src 'self' data:; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net/npm/katex@0.19.0/dist/fonts/; connect-src https://kgfybebpxpdkiouofyow.supabase.co wss://kgfybebpxpdkiouofyow.supabase.co; img-src 'self' data: blob:; base-uri 'none'; form-action 'none'; object-src 'none'">
   <title>AutoResearch Idea Tracker · PML4SC Lab</title>
   <style>
     :root{color-scheme:dark;--bg:#101216;--card:#1c2027;--raised:#252b34;--border:#343945;--text:#f5f5f7;--muted:#a5acba;--accent:#3ccca9;--blue:#90bfff;--red:#ff969c;--amber:#f3cd82}
@@ -21,7 +21,7 @@
     dialog{color:var(--text);background:var(--card);border:1px solid #47505f;border-radius:16px;padding:0;width:min(590px,calc(100% - 28px));max-height:88vh;box-shadow:0 25px 100px #0008}dialog::backdrop{background:#080b10b8;backdrop-filter:blur(4px)}.dialog-head{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:20px 24px;border-bottom:1px solid var(--border)}.dialog-head h2{margin:0}.dialog-head button{padding:5px 10px;font-size:17px}.dialog-body{padding:5px 24px 22px}dialog[open]{display:flex;flex-direction:column}.dialog-head{flex:none}.dialog-body{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}.dialog-context{font-size:13px;color:var(--muted);margin-top:17px;overflow-wrap:anywhere}.form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}.dialog-actions{display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--border);padding-top:18px;margin-top:22px}fieldset{border:0;padding:0;margin:20px 0}legend{font-size:13px;font-weight:600;margin-bottom:10px}.radio-options{display:flex;gap:12px}.radio-option{display:flex;align-items:center;gap:10px;padding:12px 20px;border:1px solid var(--border);border-radius:8px;flex:1;font-size:14px}.radio-option input{width:auto;accent-color:var(--accent)}.history{list-style:none;padding:0}.history li{padding:15px 0;border-bottom:1px solid var(--border);font-size:13px}.history li p{margin:7px 0;font-size:12px}.history time{display:block;color:var(--muted);font-size:11px;margin:5px 0}.snapshot{margin-top:10px}.snapshot summary{font-size:12px;color:var(--muted)}.snapshot pre{font:12px/1.6 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:#11161b;padding:12px;border-radius:8px}.notifications{position:fixed;bottom:24px;right:24px;width:min(410px,calc(100% - 32px));z-index:100;display:grid;gap:9px}.notification{border:1px solid #376152;background:#1d302a;color:#d8f9eb;border-radius:11px;padding:13px 15px;box-shadow:0 5px 25px #0005;font-size:13px;display:flex;gap:12px;align-items:center;justify-content:space-between}.notification.error{border-color:#80505a;background:#38242b;color:#ffd9df}.notification button{padding:0 5px;background:transparent;border:0;font-size:18px;color:inherit}
     @media(max-width:800px){.page-heading{align-items:flex-start}.account-name .small{display:none}.avatar{display:none}.stats{grid-template-columns:repeat(3,1fr);row-gap:22px}.stat:nth-child(3){border:0}.stat-value{font-size:27px}.filter-row{grid-template-columns:repeat(3,1fr)}.idea>summary{grid-template-columns:20px minmax(77px,max-content) minmax(0,1fr) auto;gap:9px}.summary-assignee{display:none}.idea-body{padding:16px 18px 20px 24px}.week-meta{font-size:11px}.summary-badges{flex-direction:column}.topbar{padding:15px 20px}}
     @media(max-width:520px){main{padding:25px 16px 40px}.page-heading{flex-direction:column;gap:18px}.account{width:100%;justify-content:space-between}.account-name{text-align:left}.page-heading h1{font-size:27px}.topbar{padding:14px 16px}.brand{font-size:12px}.connection{font-size:10px}.stats{padding:20px 0}.stat{padding:0 16px}.overview-head{padding:16px}.progress-area{padding:0 16px 20px}.search-row{grid-template-columns:1fr}.filter-row{grid-template-columns:1fr 1fr}.toolbar{align-items:flex-start;flex-direction:column}.week>summary{padding:13px 12px;align-items:flex-start}.week-meta{max-width:96px;text-align:right;white-space:normal}.week-name{font-size:12px}.week-ideas{padding:8px;gap:8px}.idea>summary{grid-template-columns:20px minmax(0,1fr) auto;gap:8px;padding:12px 10px}.idea-number{grid-column:2;grid-row:1}.idea-heading{grid-column:2;grid-row:2}.idea-title{font-size:13px}.idea>summary>.chevron{grid-row:1/3}.summary-badges{grid-column:3;grid-row:1/3}.idea-body{padding-left:25px;padding-right:8px}.section-heading{align-items:flex-start}.section-heading .small{display:block;margin-left:0;margin-top:3px}.section-heading .actions{justify-content:flex-end}.section-heading button{font-size:11px}.login{margin:4vh auto;padding:25px}.dialog-body{padding:5px 18px 18px}.dialog-head{padding:17px 18px}.footer{flex-direction:column;gap:5px}.notifications{right:16px;bottom:16px}.form-row{gap:12px}}
-    .markdown-body{white-space:normal;overflow-wrap:anywhere;min-width:0;font-size:14px;line-height:1.7;color:#c6ccd6}.markdown-body>:first-child{margin-top:0}.markdown-body>:last-child{margin-bottom:0}.markdown-body h1{font-size:24px;letter-spacing:-.4px}.markdown-body h2{font-size:20px}.markdown-body h3{font-size:17px}.markdown-body h1,.markdown-body h2,.markdown-body h3,.markdown-body h4{margin-top:1.3em;color:var(--text);line-height:1.4}.markdown-body p{color:inherit;margin:0 0 1em}.markdown-body ul,.markdown-body ol{padding-left:25px}.markdown-body blockquote{margin:16px 0;padding-left:15px;border-left:3px solid var(--accent);color:var(--muted)}.markdown-body pre{white-space:pre;overflow-x:auto;max-width:100%;padding:14px;background:#101419;border:1px solid var(--border);border-radius:8px}.markdown-body code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.88em;background:#101419;border-radius:4px;padding:2px 5px}.markdown-body pre code{padding:0}.markdown-body table{display:block;overflow-x:auto;border-collapse:collapse;max-width:100%;margin:16px 0}.markdown-body th,.markdown-body td{padding:8px 12px;border:1px solid var(--border);min-width:90px}.markdown-body th{background:var(--raised);text-align:left}.markdown-body hr{border:0;border-top:1px solid var(--border);margin:20px 0}.markdown-body .katex-display{overflow-x:auto;overflow-y:hidden;padding:6px 0;max-width:100%}.markdown-body .katex.katex-scroll{display:inline-block;max-width:100%;overflow-x:auto;overflow-y:hidden;vertical-align:middle;padding:2px 0}.markdown-body .markdown-source{white-space:pre-wrap;overflow-wrap:anywhere}.markdown-notice{font-size:12px!important;color:var(--amber)!important}.markdown-editor .field{margin-top:12px}.markdown-editor textarea{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;min-height:230px;font-size:12px;line-height:1.6}.markdown-editor .markdown-preview{padding:16px;border:1px solid var(--border);border-radius:9px;background:#151a20;max-height:340px;overflow:auto;margin-top:8px}.markdown-preview-label{font-size:12px;font-weight:600;margin-top:18px}.markdown-size{font-weight:400;color:var(--muted);font-size:12px;margin-top:7px}.markdown-import{padding:14px;border:1px dashed var(--border);border-radius:10px;margin:17px 0}.markdown-import label{margin:0}.markdown-import input{font-size:12px}.markdown-import p{font-size:12px;margin:8px 0 0}.markdown-editor-dialog{width:min(1000px,calc(100% - 28px))}.markdown-workspace{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}.markdown-workspace textarea{min-height:300px}.markdown-workspace .markdown-preview{height:300px;max-height:300px}.markdown-workspace .markdown-preview-label{margin-top:12px;line-height:19.5px}@media(max-width:700px){.markdown-workspace{grid-template-columns:minmax(0,1fr);gap:0}.markdown-workspace textarea{min-height:220px}}
+    .markdown-body{white-space:normal;overflow-wrap:anywhere;min-width:0;font-size:14px;line-height:1.7;color:#c6ccd6}.markdown-body>:first-child{margin-top:0}.markdown-body>:last-child{margin-bottom:0}.markdown-body h1{font-size:24px;letter-spacing:-.4px}.markdown-body h2{font-size:20px}.markdown-body h3{font-size:17px}.markdown-body h1,.markdown-body h2,.markdown-body h3,.markdown-body h4{margin-top:1.3em;color:var(--text);line-height:1.4}.markdown-body p{color:inherit;margin:0 0 1em}.markdown-body ul,.markdown-body ol{padding-left:25px}.markdown-body blockquote{margin:16px 0;padding-left:15px;border-left:3px solid var(--accent);color:var(--muted)}.markdown-body pre{white-space:pre;overflow-x:auto;max-width:100%;padding:14px;background:#101419;border:1px solid var(--border);border-radius:8px}.markdown-body code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.88em;background:#101419;border-radius:4px;padding:2px 5px}.markdown-body pre code{padding:0}.markdown-body table{display:block;overflow-x:auto;border-collapse:collapse;max-width:100%;margin:16px 0}.markdown-body th,.markdown-body td{padding:8px 12px;border:1px solid var(--border);min-width:90px}.markdown-body th{background:var(--raised);text-align:left}.markdown-body hr{border:0;border-top:1px solid var(--border);margin:20px 0}.markdown-body .katex-display{overflow-x:auto;overflow-y:hidden;padding:6px 0;max-width:100%}.markdown-body .katex.katex-scroll{display:inline-block;max-width:100%;overflow-x:auto;overflow-y:hidden;vertical-align:middle;padding:2px 0}.markdown-body .markdown-source{white-space:pre-wrap;overflow-wrap:anywhere}.markdown-body .attachment{display:block;margin:8px 0;color:var(--muted);font-size:12px}.markdown-body .attachment img{display:block;max-width:100%;max-height:480px;border:1px solid var(--border);border-radius:8px;background:#101419}.composer.dropping{border-color:var(--accent)}.markdown-notice{font-size:12px!important;color:var(--amber)!important}.markdown-editor .field{margin-top:12px}.markdown-editor textarea{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;min-height:230px;font-size:12px;line-height:1.6}.markdown-editor .markdown-preview{padding:16px;border:1px solid var(--border);border-radius:9px;background:#151a20;max-height:340px;overflow:auto;margin-top:8px}.markdown-preview-label{font-size:12px;font-weight:600;margin-top:18px}.markdown-size{font-weight:400;color:var(--muted);font-size:12px;margin-top:7px}.markdown-import{padding:14px;border:1px dashed var(--border);border-radius:10px;margin:17px 0}.markdown-import label{margin:0}.markdown-import input{font-size:12px}.markdown-import p{font-size:12px;margin:8px 0 0}.markdown-editor-dialog{width:min(1000px,calc(100% - 28px))}.markdown-workspace{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}.markdown-workspace textarea{min-height:300px}.markdown-workspace .markdown-preview{height:300px;max-height:300px}.markdown-workspace .markdown-preview-label{margin-top:12px;line-height:19.5px}@media(max-width:700px){.markdown-workspace{grid-template-columns:minmax(0,1fr);gap:0}.markdown-workspace textarea{min-height:220px}}
     .bell-wrap{position:relative}.bell{position:relative;display:grid;place-items:center;width:38px;height:38px;padding:0;border-radius:50%;color:#c8cfda}.bell[aria-expanded=true]{border-color:var(--accent);color:var(--text);background:#22302c}.bell-count{position:absolute;top:-5px;right:-5px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#ff6b74;color:#21090b;font-size:10px;font-weight:800;line-height:18px;text-align:center}.bell-panel{position:absolute;right:0;top:calc(100% + 10px);z-index:60;width:min(390px,calc(100vw - 32px));max-height:min(72vh,560px);overflow:auto;background:var(--card);border:1px solid #47505f;border-radius:14px;box-shadow:0 18px 60px #0009;text-align:left}.bell-head{position:sticky;top:0;z-index:1;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border);background:var(--card)}.bell-head h2{margin:0;font-size:14px}.bell-list{list-style:none;margin:0;padding:6px}.bell-item>button{width:100%;display:grid;grid-template-columns:32px minmax(0,1fr);gap:10px;align-items:start;padding:10px;border:0;border-radius:10px;background:transparent;text-align:left;font-weight:400}.bell-item>button:hover{background:#252b34}.bell-item.unread>button{background:#1b2a2b}.bell-item.unread>button:hover{background:#21332f}.bell-body{min-width:0}.bell-text{display:block;font-size:13px;font-weight:600;color:var(--text);overflow-wrap:anywhere}.bell-item.unread .bell-text::before{content:"";display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;background:var(--accent);vertical-align:middle}.bell-meta{display:block;margin-top:2px;font-size:11px;color:var(--muted);overflow-wrap:anywhere}.bell-empty{padding:18px;text-align:center;font-size:13px;color:var(--muted)}.idea.flash,li.comment.flash{animation:flash-highlight 1.8s ease}li.comment.flash{border-radius:8px}@keyframes flash-highlight{0%,35%{box-shadow:0 0 0 2px var(--accent)}100%{box-shadow:0 0 0 0 transparent}}@media(max-width:520px){.bell-panel{position:fixed;left:16px;right:16px;top:76px;width:auto}}.to-top{position:fixed;right:24px;bottom:24px;z-index:90;display:grid;place-items:center;width:44px;height:44px;padding:0;border-radius:50%;background:var(--raised);color:var(--text);box-shadow:0 6px 24px #0007;opacity:0;visibility:hidden;transform:translateY(10px);transition:opacity .2s,transform .2s,visibility .2s,border-color .15s,background .15s}.to-top.visible{opacity:1;visibility:visible;transform:none}.to-top.visible~.notifications{bottom:80px}main:focus{outline:none}@media(max-width:520px){.to-top{right:16px;bottom:16px}.to-top.visible~.notifications{bottom:72px}}.reader{display:none}.reader-head{flex:none;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:16px 22px;border-bottom:1px solid var(--border);background:var(--card)}.reader-heading{min-width:0}.reader-head h2{margin:4px 0 0;font-size:18px;line-height:1.4}.reader-head .idea-title{font-size:inherit;font-weight:650}.reader[data-priority=high] .idea-title{color:#ffc39b}.reader[data-priority=medium] .idea-title{color:#f5dc96}.reader[data-priority=low] .idea-title{color:#cdc4ff}.reader-head button{flex:none;padding:5px 10px;font-size:17px}.reader-body{padding:22px 30px 30px;scrollbar-width:thin;scrollbar-color:#4a5260 transparent}.reader-body::-webkit-scrollbar{width:10px}.reader-body::-webkit-scrollbar-track{background:transparent}.reader-body::-webkit-scrollbar-thumb{background:#4a5260;border:3px solid var(--card);border-radius:10px}@media(min-width:1100px){.reading .ideas-section{--wide:min(1680px,calc(100vw - 48px));width:var(--wide);margin-left:calc((100% - var(--wide))/2)}.reading .ideas-layout{display:grid;grid-template-columns:minmax(420px,5fr) minmax(0,7fr);gap:20px;align-items:start}.reading #ideas{min-width:0}.reading .idea .description{display:none}.reading .idea-body{padding:16px 20px 18px}.reading .idea>summary{grid-template-columns:20px minmax(0,1fr) auto;gap:4px 12px}.reading .idea>summary>.chevron{grid-row:1/4}.reading .idea>summary>.idea-number{grid-column:2;grid-row:1}.reading .idea>summary>.idea-heading{grid-column:2;grid-row:2}.reading .idea>summary>.summary-assignee{grid-column:2;grid-row:3;text-align:left;min-width:0}.reading .idea>summary>.summary-badges{grid-column:3;grid-row:1/4;align-self:center}.reading .idea.selected{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}.reader:not([hidden]){display:flex;flex-direction:column;position:sticky;top:16px;max-height:calc(100vh - 32px);overflow:hidden;border:1px solid var(--border);border-radius:13px;background:var(--card)}.reader-body{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain}}@media(prefers-reduced-motion:reduce){.flash{animation:none!important}*{transition:none!important;scroll-behavior:auto!important}}
   </style>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.19.0/dist/katex.min.css" integrity="sha384-3rdsX6e5mueWyoweR9NIVmtEsUkokpBT/0ALqKKIBMr9j4qhHkaIkAcGgsE6uVlp" crossorigin="anonymous">
@@ -91,6 +91,16 @@ const SUPABASE_URL = 'https://kgfybebpxpdkiouofyow.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_yqKiI7EJhNyA7KbB-b0cKQ_Ix03Vz62';
 const MAX_MARKDOWN_BYTES = 1048576; // Must match ideas_description_check in schema.sql.
 const utf8Bytes = text => new TextEncoder().encode(text).byteLength;
+// Comment images live in a private Storage bucket. These must match
+// supabase/migrations/add_comment_images.sql.
+const COMMENT_IMAGE_BUCKET = 'comment-images';
+const MAX_IMAGE_BYTES = 5242880;
+const IMAGE_EXTENSIONS = {'image/png':'png','image/jpeg':'jpg','image/gif':'gif','image/webp':'webp'};
+const IMAGE_TYPES = Object.fromEntries(Object.entries(IMAGE_EXTENSIONS).map(([type,ext]) => [ext,type]));
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const ATTACHMENT_PATH = new RegExp(`^${UUID}/${UUID}\\.(?:png|jpg|gif|webp)$`);
+// Stands in for an image while it uploads; a draft containing one cannot be posted.
+const UPLOAD_MARKER = new RegExp(`!\\[Uploading image…\\]\\(${UUID}\\)`);
 const MIN_PASSWORD_LENGTH = 8; // Keep at or above the Supabase Auth minimum password length.
 const MAX_PASSWORD_BYTES = 72; // Supabase Auth rejects longer passwords.
 const ONBOARDING_KEY = 'autoresearch.pendingOnboarding'; // Stores an Auth user ID only, never a password.
@@ -106,7 +116,7 @@ const state = {
   notifications: null,
   participants: [], participantsByIdea: new Map(), commentsByIdea: new Map(), commentCounts: new Map(),
   commentDrafts: new Map(), commentSort: new Map(), commentLimit: new Map(), renderPending: false,
-  replyOpen: new Set(), commentCollapsed: new Map(),
+  replyOpen: new Set(), commentCollapsed: new Map(), attachments: new Map(),
   epoch: 0, pending: false, stale: false, live: false, channel: null,
   refreshTask: null, refreshAgain: false, syncToken: null, refreshTimer: null, retryTimer: null,
   retryDelay: 2000, pollTimer: null, checkedAt: 0, history: null, historyVersion: 0,
@@ -241,8 +251,15 @@ function getMarkdownParser() {
   addBracketMath(markdownParser);
   // Local Markdown files have no hosted asset base. Do not fetch tracking images
   // or attempt uploads; retain the original image syntax in the stored source.
-  markdownParser.renderer.rules.image = (tokens,index) =>
-    markdownParser.utils.escapeHtml(`[Image: ${tokens[index].content || 'image'}]`);
+  // The one exception is an image in the private comment-images bucket
+  // (attachment:<uid>/<uuid>.<ext>): it becomes a placeholder that
+  // showAttachment() fills with the image downloaded with the member's session.
+  markdownParser.renderer.rules.image = (tokens,index) => {
+    const escape = markdownParser.utils.escapeHtml, alt = tokens[index].content || 'image';
+    const path = /^attachment:(.*)$/.exec(tokens[index].attrGet('src') || '')?.[1];
+    return path && ATTACHMENT_PATH.test(path) ? `<span class="attachment" title="${escape(path)}">${escape(alt)}</span>`
+      : escape(`[Image: ${alt}]`);
+  };
   return markdownParser;
 }
 // An inline formula that cannot wrap (one long \text, \underbrace, …) would run
@@ -283,11 +300,57 @@ function renderMarkdown(container, source) {
       if (!url) link.replaceWith(...link.childNodes);
       else { link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; }
     }
+    fragment.querySelectorAll('span.attachment').forEach(showAttachment);
     container.append(fragment);
     scheduleFitInlineMath();
   } catch (error) {
     container.append(node('p','markdown-notice',error.message || 'Preview unavailable. Showing original text.'),node('div','markdown-source',source));
   }
+}
+// Storage reads need the session, so a plain <img src> cannot fetch an image:
+// each is downloaded once and shown from a blob: URL, cached by path until
+// sign-out. The blob gets the type its extension names, never the server's.
+function attachmentURL(path) {
+  let url = state.attachments.get(path);
+  if (url) return url;
+  const epoch = state.epoch;
+  url = state.client.storage.from(COMMENT_IMAGE_BUCKET).download(path).then(({data,error}) => {
+    if (error || !data) throw error || new Error('Image unavailable');
+    if (epoch !== state.epoch) throw new Error('Signed out');
+    return URL.createObjectURL(new Blob([data],{type:IMAGE_TYPES[path.split('.').pop()]}));
+  });
+  // A failed download is retried by the next render rather than cached.
+  url.catch(() => { if (state.attachments.get(path) === url) state.attachments.delete(path); });
+  state.attachments.set(path,url);
+  return url;
+}
+function showAttachment(placeholder) {
+  const path = placeholder.title, alt = placeholder.textContent;
+  placeholder.removeAttribute('title');
+  if (!ATTACHMENT_PATH.test(path) || !state.client) { placeholder.replaceWith(`[Image: ${alt}]`); return; }
+  placeholder.textContent = `Loading image: ${alt}…`;
+  attachmentURL(path).then(url => {
+    const link = node('a'), image = node('img');
+    link.href = url; link.target = '_blank'; link.rel = 'noopener'; link.title = 'Open full size';
+    image.src = url; image.alt = alt;
+    link.append(image); placeholder.replaceChildren(link);
+  },() => { placeholder.textContent = `[Image unavailable: ${alt}]`; });
+}
+async function uploadAttachment(file) {
+  const epoch = state.epoch, path = `${state.userId}/${newRequestId()}.${IMAGE_EXTENSIONS[file.type]}`;
+  const {error} = await state.client.storage.from(COMMENT_IMAGE_BUCKET).upload(path,file,{contentType:file.type,upsert:false});
+  if (error) throw error;
+  if (epoch !== state.epoch) throw new Error('Signed out');
+  state.attachments.set(path,Promise.resolve(URL.createObjectURL(file))); // the uploader never downloads it again
+  return path;
+}
+function imageError(error) {
+  const message = String(error?.message || '');
+  if (/bucket not found/i.test(message)) return 'Image uploads are not enabled yet: the administrator must first run supabase/migrations/add_comment_images.sql.';
+  if (/row-level security|unauthorized/i.test(message)) return 'Permission denied: only active members can upload images.';
+  if (/too large|maximum allowed size/i.test(message)) return 'Images are limited to 5 MiB.';
+  if (/mime type/i.test(message)) return 'Only PNG, JPEG, GIF and WebP images can be uploaded.';
+  return 'The image could not be uploaded. Check your connection and try again; the rest of your draft is unchanged.';
 }
 function suggestedMarkdownTitle(source, filename) {
   const parser = getMarkdownParser();
@@ -382,7 +445,8 @@ async function boundedFetch(input, options = {}) {
   const abort = () => controller.abort();
   if (options.signal?.aborted) abort();
   options.signal?.addEventListener('abort', abort, {once:true});
-  const timeout = setTimeout(abort, 15000);
+  // Image uploads and downloads (Storage) may take longer than data requests.
+  const timeout = setTimeout(abort, String(input?.url ?? input).includes('/storage/v1/') ? 60000 : 15000);
   try { return await fetch(input, {...options, signal:controller.signal}); }
   finally { clearTimeout(timeout); options.signal?.removeEventListener('abort', abort); }
 }
@@ -451,6 +515,8 @@ function clearWorkspace() {
   // Drafts belong to the signed-in member; never carry them into another session.
   state.commentDrafts.clear(); state.commentSort.clear(); state.commentLimit.clear(); state.renderPending = false;
   state.replyOpen.clear(); state.commentCollapsed.clear();
+  for (const url of state.attachments.values()) url.then(value => URL.revokeObjectURL(value),() => {});
+  state.attachments.clear();
   state.notifications = freshNotifications();
   $('bell-panel').hidden = true; $('bell-count').hidden = true; $('bell-button').setAttribute('aria-expanded','false');
   $('ideas').replaceChildren(); $('stats').replaceChildren(); $('modal-body').replaceChildren();
@@ -1330,9 +1396,14 @@ function commentComposer(idea, parent = null) {
     preview.hidden = !draft.preview; toggle.textContent = draft.preview ? 'Edit' : 'Preview'; showPreview();
   });
   const post = node('button','primary',parent ? 'Post reply' : 'Post comment'); post.type = 'submit'; post.dataset.mutation = '';
+  const picker = document.createElement('input');
+  picker.type = 'file'; picker.accept = Object.keys(IMAGE_EXTENSIONS).join(','); picker.multiple = true; picker.hidden = true;
+  picker.setAttribute('aria-label','Choose images');
+  const attach = button('Image','quiet attach-image',() => picker.click(),true);
+  attach.title = 'Add images. You can also paste or drop screenshots into the text box.';
   if (parent) actions.append(button('Cancel','quiet',() => closeReplyComposer(idea,parent,form.closest('li.comment'),true)));
-  actions.append(toggle,post); foot.append(node('span','','Markdown · LaTeX supported'),actions);
-  form.append(input,preview,error,foot);
+  actions.append(attach,toggle,post); foot.append(node('span','','Markdown · LaTeX · paste images'),actions);
+  form.append(input,preview,error,foot,picker);
   const showPreview = () => {
     if (!draft.preview || !form.isConnected) return;
     if (input.value.trim()) renderMarkdown(preview,input.value);
@@ -1348,10 +1419,66 @@ function commentComposer(idea, parent = null) {
   input.addEventListener('keydown',event => {
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); post.click(); }
   });
+  // Each image is uploaded first and then referenced from the Markdown on its
+  // own line. A marker holds its place meanwhile; the card may be rebuilt
+  // during the upload, so the marker is replaced in whichever textarea (or
+  // saved draft) holds it by then.
+  const liveInput = () => [...document.querySelectorAll('.comment-input')].find(el => el.dataset.focusKey === `${key}-composer`);
+  const replaceMarker = (marker,replacement,span = marker) => {
+    const current = liveInput(), saved = state.commentDrafts.get(key);
+    const text = current ? current.value : saved?.text || '';
+    const target = text.includes(span) ? span : marker, at = text.indexOf(target);
+    if (at < 0) return;
+    if (current) {
+      current.setRangeText(replacement,at,at + target.length,'preserve');
+      current.dispatchEvent(new Event('input'));
+    } else Object.assign(saved,{text:text.slice(0,at) + replacement + text.slice(at + target.length),requestId:newRequestId()});
+  };
+  const addImages = files => {
+    error.textContent = '';
+    if (!state.profile?.active || state.stale || !navigator.onLine) { error.textContent = 'Images can be added only while connected.'; return; }
+    for (const file of files) {
+      if (!IMAGE_EXTENSIONS[file.type]) { error.textContent = `${file.name || 'This file'} is not a PNG, JPEG, GIF or WebP image.`; continue; }
+      if (file.size > MAX_IMAGE_BYTES) { error.textContent = `${file.name || 'This image'} is larger than 5 MiB.`; continue; }
+      const marker = `![Uploading image…](${newRequestId()})`;
+      const start = input.selectionStart ?? input.value.length, end = input.selectionEnd ?? start;
+      const before = input.value.slice(0,start), after = input.value.slice(end);
+      const inserted = `${before && !before.endsWith('\n') ? '\n' : ''}${marker}${after.startsWith('\n') ? '' : '\n'}`;
+      input.setRangeText(inserted,start,end,'end');
+      input.dispatchEvent(new Event('input'));
+      const alt = file.name.replace(/\.[^.]*$/,'').replace(/[[\]\\\r\n]+/g,' ').trim().slice(0,80) || 'image';
+      uploadAttachment(file).then(path => replaceMarker(marker,`![${alt}](attachment:${path})`),failure => {
+        // Take back the whole inserted line if it is still intact.
+        replaceMarker(marker,'',inserted);
+        const message = imageError(failure);
+        if (error.isConnected) error.textContent = message;
+        showNotification(message,true);
+      });
+    }
+  };
+  picker.addEventListener('change',() => { const files = [...picker.files]; picker.value = ''; input.focus(); addImages(files); });
+  input.addEventListener('paste',event => {
+    // Pasted text that also carries a picture (e.g. from a word processor) stays text.
+    const files = [...(event.clipboardData?.files || [])];
+    if (!files.some(file => file.type.startsWith('image/')) || event.clipboardData.types?.includes('text/plain')) return;
+    event.preventDefault(); addImages(files);
+  });
+  input.addEventListener('dragover',event => {
+    if (!event.dataTransfer?.types?.includes('Files')) return;
+    event.preventDefault(); form.classList.add('dropping');
+  });
+  input.addEventListener('dragleave',() => form.classList.remove('dropping'));
+  input.addEventListener('drop',event => {
+    form.classList.remove('dropping');
+    const files = [...(event.dataTransfer?.files || [])];
+    if (!files.length) return;
+    event.preventDefault(); input.focus(); addImages(files);
+  });
   form.addEventListener('submit',event => {
     event.preventDefault(); error.textContent = '';
     const text = input.value, requestId = draft.requestId;
     if (!text.trim()) { error.textContent = parent ? 'Write a reply before posting.' : 'Write a comment before posting.'; input.focus(); return; }
+    if (UPLOAD_MARKER.test(text)) { error.textContent = 'Wait for the image upload to finish before posting.'; return; }
     if (utf8Bytes(text) > MAX_COMMENT_BYTES) { error.textContent = 'Comments are limited to 20 KiB of UTF-8 text. Shorten it; nothing has been removed.'; input.focus(); return; }
     const [name,args] = parent ? ['reply_to_comment',{p_parent_comment_id:parent.id,p_body:text,p_client_request_id:requestId}]
       : ['add_comment',{p_idea_id:idea.id,p_body:text,p_client_request_id:requestId}];
