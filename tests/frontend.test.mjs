@@ -44,7 +44,7 @@ let participants = [
 let comments = [{id:'comment-1',idea_id:'idea-3',author_id:'member-2',body:'Initial **synthetic** note with $x^2$.',
   client_request_id:'00000000-0000-4000-8000-000000000001',created_at:'2026-10-13T16:00:00Z',removed_at:null,removed_by:null}];
 let events = [], currentId = 'member-0', authCallback, channel, rpcError, loseNextResponse = false, readsFail = false, delayRead, calls = [], removed = 0, serial = 100;
-let notificationReads = [], readCalls = [], notificationsFail = false;
+let notificationReads = [], readCalls = [], notificationsFail = false, reads = [];
 const session = () => currentId ? {user:{id:currentId},access_token:'synthetic-test-token'} : null;
 const rowsFor = table => ({profiles,ideas,idea_participants:participants,idea_comments:comments,notification_reads:notificationReads})[table] || [...events].reverse();
 // Applies a PostgREST select list, including JSON paths such as "title:new_state->>title".
@@ -56,9 +56,10 @@ const project = (rows,columns) => !columns || columns === '*' ? rows : rows.map(
   return [alias,value === undefined || value === null ? null : path[2] ? (typeof value === 'object' ? JSON.stringify(value) : String(value)) : value];
 })));
 function query(table) {
-  const filters = []; let low=0, high=Infinity, limit=Infinity, single=false;
+  reads.push(table);
+  const filters = []; let low=0, high=Infinity, limit=Infinity, single=false, counted=false;
   const builder = {
-    select(columns){this.columns=columns;return this;},order(){return this;},eq(key,value){filters.push(row=>row[key]===value);return this;},
+    select(columns,options){this.columns=columns;counted=options?.count==='exact';return this;},order(){return this;},eq(key,value){filters.push(row=>row[key]===value);return this;},
     lt(key,value){filters.push(row=>Number(row[key])<Number(value));return this;},
     range(from,to){low=from;high=to;return this;},limit(value){limit=value;return this;},maybeSingle(){single=true;return this;},
     async then(resolve,reject) {
@@ -66,9 +67,10 @@ function query(table) {
         if (delayRead && table==='ideas') { const delay=delayRead; delayRead=null; await delay; }
         if (readsFail) return resolve({data:null,error:{message:'Network unavailable'}});
         if (notificationsFail && table==='notification_reads') return resolve({data:null,error:{code:'42P01',message:'relation "public.notification_reads" does not exist'}});
-        let rows = clone(rowsFor(table));
-        rows = project(rows.filter(row=>filters.every(filter=>filter(row))).slice(low,Math.min(high+1,low+limit)),this.columns);
-        resolve({data:single ? rows[0] || null : rows,error:null});
+        let rows = clone(rowsFor(table)).filter(row=>filters.every(filter=>filter(row)));
+        const count = rows.length;
+        rows = project(rows.slice(low,Math.min(high+1,low+limit)),this.columns);
+        resolve({data:single ? rows[0] || null : rows,error:null,...(counted ? {count} : {})});
       } catch(error) { reject(error); }
     }
   }; return builder;
@@ -195,7 +197,7 @@ installMarkdownLibraries(w);
 w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
 w.HTMLDialogElement.prototype.close=function(){this.open=false;};
 w.supabase={createClient:()=>client};
-w.eval(script+'\nwindow.__app = {state,loadIdeas,loadCurrentUser,renderDashboard,openIdeaDialog,openResultDialog,confirmAction,joinIdea,mutate,openHistory,safeURL,closeModal,filteredIdeas,renderMarkdown,suggestedMarkdownTitle,readMarkdownFile,markdownFileName};');
+w.eval(script+'\nwindow.__app = {state,loadIdeas,checkForChanges,pollTick,loadCurrentUser,renderDashboard,openIdeaDialog,openResultDialog,confirmAction,joinIdea,mutate,openHistory,safeURL,closeModal,filteredIdeas,renderMarkdown,suggestedMarkdownTitle,readMarkdownFile,markdownFileName};');
 const app=w.__app;
 const wait=async condition=>{for(let n=0;n<200;n++){if(condition())return;await new Promise(resolve=>setTimeout(resolve,5));}throw Error('Timed out waiting for DOM test condition');};
 const click = id => d.getElementById(id).click();
@@ -522,7 +524,7 @@ try {
   typeInto(draftBox,'Reply draft in progress');draftBox.focus();draftBox.setSelectionRange(6,6);
   currentId='member-2';
   await client.rpc('reply_to_comment',{p_parent_comment_id:rootId,p_body:'Remote nested reply',p_client_request_id:'00000000-0000-4000-8000-000000000077'});
-  await client.rpc('add_comment',{p_idea_id:'idea-4',p_body:'Remote top-level',p_client_request_id:'00000000-0000-4000-8000-000000000078'});
+  await client.rpc('add_comment',{p_idea_id:'idea-4',p_body:'Remote top-level',p_client_request_id:'00000000-0000-4000-8000-0000000c0de2'});
   currentId='member-0';
   await app.loadIdeas();
   check([own(commentNode('IDEA-004',rootId),'.reply-slot .comment-input')===draftBox,draftBox.value,d.activeElement===draftBox,draftBox.selectionStart],[true,'Reply draft in progress',true,6],'open reply box keeps its node, text, focus and caret');
@@ -1119,6 +1121,42 @@ try {
   const manual=d.querySelector('#modal-body textarea');manual.value='x'.repeat(1048577);manual.dispatchEvent(new w.Event('input'));
   const beforeOversize=calls.length;submit();check(calls.length,beforeOversize,'oversized manual draft cannot submit');
   check(manual.value.length,1048577,'oversized manual draft not truncated');app.closeModal();
+
+  // ---- Change checks: polls and reconnects download the workspace only when it changed.
+  {
+    const bulk=['ideas','idea_participants','idea_comments'];
+    const fullReads=()=>reads.filter(table=>bulk.includes(table)).length;
+    const flush=async()=>{await settled();await new Promise(resolve=>setTimeout(resolve,20));await settled();};
+    const tick=async live=>{const saved=app.state.live;app.state.live=live;app.pollTick();await flush();app.state.live=saved;};
+    await settled();reads=[];
+    await tick(false);
+    check([fullReads(),reads.filter(t=>t==='idea_events').length,reads.filter(t=>t==='profiles').length],[0,1,1],'Realtime down, nothing changed: the 30-second poll reads only the change token');
+    reads=[];await tick(true);
+    w.dispatchEvent(new w.Event('focus'));const savedLive=app.state.live;app.state.live=true;d.dispatchEvent(new w.Event('visibilitychange'));app.state.live=savedLive;await flush();
+    check(reads,[],'Realtime live: no poll within the hour, and focus or a tab switch makes no request');
+    app.state.checkedAt=Date.now()-3600000;reads=[];await tick(true);
+    check([fullReads(),reads.includes('idea_events')],[0,true],'Realtime live: one safety-net check per hour');
+    currentId='member-2';await client.rpc('add_comment',{p_idea_id:'idea-3',p_body:'Change seen by the next check',p_client_request_id:'00000000-0000-4000-8000-0000000c0de1'});currentId='member-0';
+    reads=[];await tick(false);
+    check([fullReads(),[...app.state.commentsByIdea.get('idea-3')].some(c=>c.body==='Change seen by the next check')],[3,true],'a change missed by Realtime makes the next check reload everything once');
+    reads=[];await tick(false);check(fullReads(),0,'and the following check is cheap again');
+    // An earlier transaction committing late: same newest ID, one more event.
+    const late={...events.at(-1),id:events.at(-1).id-0.5};events.splice(events.length-1,0,late);
+    reads=[];await app.checkForChanges();await settled();
+    check(fullReads(),3,'a late commit (count changes, newest ID does not) still reloads');
+    events.splice(events.indexOf(late),1);await app.loadIdeas();
+    profiles[2].display_name='Junqi Renamed';reads=[];await app.checkForChanges();await settled();
+    check([fullReads(),app.state.profiles.some(p=>p.display_name==='Junqi Renamed')],[3,true],'a profile change reloads');
+    profiles[2].display_name='Junqi';await app.loadIdeas();
+    readsFail=true;await app.checkForChanges();
+    check([app.state.stale,text('last-synced')],[true,'Refresh failed · data may be stale'],'a failed check marks the data stale');
+    readsFail=false;reads=[];await app.checkForChanges();
+    check([app.state.stale,fullReads(),text('last-synced').startsWith('Synced')],[false,0,true],'recovery with an unchanged token needs no full download');
+    let releaseSlow;delayRead=new Promise(resolve=>releaseSlow=resolve);const slow=app.loadIdeas();
+    currentId='member-1';await client.rpc('add_comment',{p_idea_id:'idea-3',p_body:'Committed during a slow load',p_client_request_id:'00000000-0000-4000-8000-0000000c0de2'});currentId='member-0';
+    const waiting=app.checkForChanges();releaseSlow();await slow;await waiting;await settled();
+    check(app.state.commentsByIdea.get('idea-3').some(c=>c.body==='Committed during a slow load'),true,'a check during a load runs after it and catches a change the load missed');
+  }
 
   let releaseLate;delayRead=new Promise(resolve=>releaseLate=resolve);const late=app.loadIdeas();
   await app.loadCurrentUser(null);releaseLate();await late;

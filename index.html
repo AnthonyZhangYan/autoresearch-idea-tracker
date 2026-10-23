@@ -108,8 +108,8 @@ const state = {
   commentDrafts: new Map(), commentSort: new Map(), commentLimit: new Map(), renderPending: false,
   replyOpen: new Set(), commentCollapsed: new Map(),
   epoch: 0, pending: false, stale: false, live: false, channel: null,
-  refreshTask: null, refreshAgain: false, refreshTimer: null, retryTimer: null,
-  retryDelay: 2000, pollTimer: null, history: null, historyVersion: 0,
+  refreshTask: null, refreshAgain: false, syncToken: null, refreshTimer: null, retryTimer: null,
+  retryDelay: 2000, pollTimer: null, checkedAt: 0, history: null, historyVersion: 0,
   weekOpen: new Map(), ideaOpen: new Map(), readingId: null, modalOpener: null
 };
 const filterIds = ['search','sort','week-filter','status-filter','member-filter','result-filter','priority-filter'];
@@ -445,7 +445,7 @@ function stopRealtime() {
 }
 function clearWorkspace() {
   state.epoch++; stopRealtime(); state.profile = null; state.profiles = []; state.ideas = [];
-  state.loaded = false; state.stale = false; state.refreshTask = null; state.refreshAgain = false;
+  state.loaded = false; state.stale = false; state.refreshTask = null; state.refreshAgain = false; state.syncToken = null;
   state.history = null; state.historyVersion++; state.weekOpen.clear(); state.ideaOpen.clear(); state.readingId = null;
   state.participants = []; state.participantsByIdea = new Map(); state.commentsByIdea = new Map(); state.commentCounts = new Map();
   // Drafts belong to the signed-in member; never carry them into another session.
@@ -498,7 +498,7 @@ async function loadCurrentUser(session) {
     $('create-button').hidden = false; // every active member can publish ideas
     renderDashboard();
     subscribeToRealtime();
-    state.pollTimer = setInterval(() => { if (navigator.onLine && !document.hidden) void loadIdeas(); },30000);
+    state.pollTimer = setInterval(pollTick,POLL_INTERVAL);
     await loadIdeas();
   } catch (error) {
     if (epoch !== state.epoch) return;
@@ -687,6 +687,51 @@ function ideaSummary(idea) {
   const success = count(p => p.result === 'success'), fail = count(p => p.result === 'fail');
   return {active,testing:count(p => p.status === 'testing'),success,fail,results:success + fail};
 }
+const markSynced = () => {
+  state.checkedAt = Date.now();
+  $('last-synced').textContent = `Synced ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})}`;
+};
+// While Realtime is connected it delivers every change, so the poll is only a
+// safety net for a subscription that silently stopped delivering: once an hour.
+// While it is down, the poll checks every 30 seconds instead.
+const POLL_INTERVAL = 30000, LIVE_CHECK_INTERVAL = 3600000;
+function pollTick() {
+  if (!navigator.onLine || document.hidden) return;
+  if (!state.live || Date.now() - state.checkedAt >= LIVE_CHECK_INTERVAL) void checkForChanges();
+}
+// Every idea, participant and comment change (deletions included) appends an
+// idea_events row in the same transaction, and events are never deleted, so
+// the event count and newest ID change exactly when the workspace does. The
+// few profile rows are compared directly (they also reveal lost membership).
+async function fetchChangeToken() {
+  const [events, profiles] = await Promise.all([
+    state.client.from('idea_events').select('id',{count:'exact'}).order('id',{ascending:false}).limit(1),
+    state.client.from('profiles').select('id,display_name,role,active').order('display_name')
+  ]);
+  if (events.error) throw events.error;
+  if (profiles.error) throw profiles.error;
+  return {token:JSON.stringify([events.count,events.data[0]?.id ?? null,profiles.data]),profiles:profiles.data};
+}
+// Polls, focus, tab switches and reconnects only ask whether anything changed
+// (a few hundred bytes). The whole workspace, with every Markdown description,
+// is downloaded again only when it did.
+async function checkForChanges() {
+  if (!state.profile) return;
+  if (state.refreshTask) { await state.refreshTask; return checkForChanges(); }
+  if (!state.syncToken) return loadIdeas();
+  const epoch = state.epoch;
+  try {
+    const {token} = await fetchChangeToken();
+    if (epoch !== state.epoch || state.refreshTask) return;
+    if (token !== state.syncToken) return loadIdeas();
+    state.stale = false; markSynced();
+  } catch (error) {
+    if (epoch !== state.epoch) return;
+    state.stale = true; $('last-synced').textContent = 'Refresh failed · data may be stale';
+    $('ideas').setAttribute('aria-label', friendlyError(error));
+  }
+  updateConnection();
+}
 // Coalesce event bursts and serialize refreshes. A response from a previous Auth
 // session never renders; an event during a request guarantees another fetch.
 function loadIdeas() {
@@ -698,15 +743,17 @@ function loadIdeas() {
       state.refreshAgain = false;
       $('refresh').disabled = true; $('ideas').setAttribute('aria-busy','true');
       try {
-        const [ideas, participants, comments, profilesResult] = await Promise.all([
+        // The change token is read BEFORE the data: a change committed after
+        // this point alters the next token, so a later check cannot miss it.
+        const {token, profiles} = await fetchChangeToken();
+        if (epoch !== state.epoch) return;
+        const [ideas, participants, comments] = await Promise.all([
           fetchAll('ideas','*','idea_number',row => row.id),
           fetchAll('idea_participants','*','joined_at',row => `${row.idea_id}:${row.member_id}`),
-          fetchAll('idea_comments','*','created_at',row => row.id),
-          state.client.from('profiles').select('id,display_name,role,active').order('display_name')
+          fetchAll('idea_comments','*','created_at',row => row.id)
         ]);
         if (epoch !== state.epoch) return;
-        if (profilesResult.error) throw profilesResult.error;
-        const profile = profilesResult.data.find(p => p.id === state.userId && p.active);
+        const profile = profiles.find(p => p.id === state.userId && p.active);
         if (!profile) {
           const userId = state.userId;
           clearWorkspace(); state.userId = userId;
@@ -714,7 +761,7 @@ function loadIdeas() {
           $('access-message').textContent = 'Your account is no longer an active lab member. Contact the lab administrator.';
           return;
         }
-        state.profile = profile; state.ideas = ideas; state.profiles = profilesResult.data;
+        state.profile = profile; state.ideas = ideas; state.profiles = profiles; state.syncToken = token;
         paintAvatar($('avatar'),state.userId);
         state.participants = participants; state.participantsByIdea = new Map();
         participants.forEach(row => {
@@ -729,7 +776,7 @@ function loadIdeas() {
         });
         state.loaded = true; state.stale = false;
         $('create-button').hidden = false;
-        $('last-synced').textContent = `Synced ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})}`;
+        markSynced();
         renderDashboard();
         if (state.history && $('modal').open) void loadHistory(true);
         void loadNotifications(epoch);
@@ -773,7 +820,7 @@ function subscribeToRealtime() {
     if (epoch !== state.epoch || channel !== state.channel) return;
     if (status === 'SUBSCRIBED') {
       state.live = true; state.retryDelay = 2000; clearTimeout(state.retryTimer); state.retryTimer = null;
-      void loadIdeas(); // closes the initial fetch/subscribe gap and catches missed events
+      void checkForChanges(); // closes the initial fetch/subscribe gap and catches missed events
     } else if (['CHANNEL_ERROR','TIMED_OUT','CLOSED'].includes(status)) {
       state.live = false;
       if (!state.retryTimer && navigator.onLine) {
@@ -1779,9 +1826,10 @@ function bindInterface() {
   window.matchMedia?.(WIDE_QUERY)?.addEventListener?.('change',updateReader);
   $('refresh').addEventListener('click',() => void loadIdeas());
   window.addEventListener('offline',() => { state.live = false; updateConnection(); });
-  window.addEventListener('online',() => { subscribeToRealtime(); void loadIdeas(); updateConnection(); });
-  document.addEventListener('visibilitychange',() => { if (!document.hidden && state.profile) { if (!state.live) subscribeToRealtime(); void loadIdeas(); } });
-  window.addEventListener('focus',() => { if (state.profile && navigator.onLine) void loadIdeas(); });
+  window.addEventListener('online',() => { subscribeToRealtime(); void checkForChanges(); updateConnection(); });
+  // Back in the foreground: only a broken subscription needs attention (its
+  // reconnection checks for missed changes); a live one missed nothing.
+  document.addEventListener('visibilitychange',() => { if (!document.hidden && state.profile && !state.live) { subscribeToRealtime(); void checkForChanges(); } });
   window.addEventListener('resize',scheduleFitInlineMath);
   const syncToTop = () => $('to-top').classList.toggle('visible',window.scrollY > 400);
   window.addEventListener('scroll',syncToTop,{passive:true}); syncToTop();
